@@ -1,4 +1,3 @@
-import type { CCEncodingContext, CCParsingContext } from "@zwave-js/cc";
 import {
 	CommandClasses,
 	Duration,
@@ -47,6 +46,7 @@ import {
 	type InterviewContext,
 	type PersistValuesContext,
 	type RefreshValuesContext,
+	type RefreshValuesOptions,
 	getEffectiveCCVersion,
 } from "../lib/CommandClass.js";
 import {
@@ -68,6 +68,7 @@ import {
 	type ColorTable,
 	LevelChangeDirection,
 } from "../lib/_Types.js";
+import type { CCEncodingContext, CCParsingContext } from "../lib/traits.js";
 
 const hexColorRegex =
 	/^#?(?<red>[0-9a-f]{2})(?<green>[0-9a-f]{2})(?<blue>[0-9a-f]{2})$/i;
@@ -114,7 +115,7 @@ export const ColorSwitchCCValues = V.defineCCValues(
 			{
 				...ValueMetadata.ReadOnly,
 				label: `Current color`,
-			} as const,
+			},
 		),
 		...V.staticPropertyWithName(
 			"targetColor",
@@ -123,14 +124,14 @@ export const ColorSwitchCCValues = V.defineCCValues(
 				...ValueMetadata.Any,
 				label: `Target color`,
 				valueChangeOptions: ["transitionDuration"],
-			} as const,
+			},
 		),
 		...V.staticProperty(
 			"duration",
 			{
 				...ValueMetadata.ReadOnlyDuration,
 				label: "Remaining duration",
-			} as const,
+			},
 		),
 		...V.staticProperty(
 			"hexColor",
@@ -140,7 +141,7 @@ export const ColorSwitchCCValues = V.defineCCValues(
 				maxLength: 7, // to allow #rrggbb
 				label: `RGB Color`,
 				valueChangeOptions: ["transitionDuration"],
-			} as const,
+			},
 		),
 		...V.dynamicPropertyAndKeyWithName(
 			"currentColorChannel",
@@ -623,6 +624,7 @@ export class ColorSwitchCC extends CommandClass {
 
 	public async refreshValues(
 		ctx: RefreshValuesContext,
+		options?: RefreshValuesOptions,
 	): Promise<void> {
 		const node = this.getNode(ctx)!;
 		const endpoint = this.getEndpoint(ctx)!;
@@ -631,7 +633,7 @@ export class ColorSwitchCC extends CommandClass {
 			ctx,
 			endpoint,
 		).withOptions({
-			priority: MessagePriority.NodeQuery,
+			priority: options?.priority ?? MessagePriority.NodeQuery,
 		});
 
 		const supportedColors: readonly ColorComponent[] = this.getValue(
@@ -1001,8 +1003,10 @@ export class ColorSwitchCCSet extends ColorSwitchCC {
 			const component = raw.payload[offset];
 			const value = raw.payload[offset + 1];
 			const key = colorComponentToTableKey(component);
-			// @ts-expect-error
-			if (key) this.colorTable[key] = value;
+			if (key) {
+				// @ts-expect-error
+				this.colorTable[key] = value;
+			}
 			offset += 2;
 		}
 

@@ -224,6 +224,21 @@ export class Endpoint
 	}
 
 	/**
+	 * Determines if support for a CC was force-added via config file. */
+	public wasCCSupportAddedViaConfig(cc: CommandClasses): boolean {
+		const compatConfig = this.tryGetNode()?.deviceConfig?.compat;
+		if (!compatConfig) return false;
+
+		const addedCC = compatConfig.addCCs?.get(cc);
+		if (!addedCC) return false;
+
+		const endpointInfo = addedCC.endpoints.get(this.index);
+		if (!endpointInfo) return false;
+
+		return endpointInfo.isSupported === true;
+	}
+
+	/**
 	 * Retrieves the version of the given CommandClass this endpoint implements.
 	 * Returns 0 if the CC is not supported.
 	 */
@@ -269,7 +284,7 @@ export class Endpoint
 				ZWaveErrorCodes.CC_NotSupported,
 			);
 		}
-		return CommandClass.createInstanceUnchecked(this, cc);
+		return CommandClass.createInstanceUnchecked<T>(this, cc);
 	}
 
 	/**
@@ -281,7 +296,7 @@ export class Endpoint
 	): T | undefined {
 		const ccId = typeof cc === "number" ? cc : getCommandClassStatic(cc);
 		if (this.supportsCC(ccId) || this.controlsCC(ccId)) {
-			return CommandClass.createInstanceUnchecked(this, cc);
+			return CommandClass.createInstanceUnchecked<T>(this, cc);
 		}
 	}
 

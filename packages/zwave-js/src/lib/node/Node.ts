@@ -176,7 +176,10 @@ import {
 	handleAGINameGet,
 	handleAssociationSupportedGroupingsGet,
 } from "./CCHandlers/AssociationGroupInformationCC.js";
-import { handleBasicCommand } from "./CCHandlers/BasicCC.js";
+import {
+	getBasicMappingTarget,
+	handleBasicCommand,
+} from "./CCHandlers/BasicCC.js";
 import { handleBatteryReport } from "./CCHandlers/BatteryCC.js";
 import { handleBinarySwitchCommand } from "./CCHandlers/BinarySwitchCC.js";
 import {
@@ -1950,8 +1953,25 @@ protocol version:      ${this.protocolVersion}`;
 			!this.wasCCRemovedViaConfig(CommandClasses.Basic)
 			&& this.getCCVersion(CommandClasses.Basic) > 0
 		) {
-			if (this.maySupportBasicCC()) {
-				// The device probably supports Basic CC and is allowed to.
+			// When Basic Sets are mapped to another supported CC, we don't need
+			// to interview Basic CC at all, and we can hide the values.
+			const basicSetMappingTarget =
+				compat?.mapBasicSet === "Binary Sensor"
+					? CommandClasses["Binary Sensor"]
+					: compat?.mapBasicSet === "auto"
+					? getBasicMappingTarget(this.deviceClass)
+					: undefined;
+
+			const basicSetMappingWillSucceed =
+				basicSetMappingTarget != undefined
+				&& this.supportsCC(basicSetMappingTarget);
+
+			if (
+				this.wasCCSupportAddedViaConfig(CommandClasses.Basic)
+				|| (this.maySupportBasicCC() && !basicSetMappingWillSucceed)
+			) {
+				// Either the device probably supports Basic CC and is allowed to.
+				// Or we force-added support through a config file.
 				// Interview the Basic CC to figure out if it actually supports it
 				this.driver.controllerLog.logNode(
 					this.id,
@@ -1965,6 +1985,9 @@ protocol version:      ${this.protocolVersion}`;
 					true,
 				);
 				if (typeof action === "boolean") return action;
+			} else if (basicSetMappingWillSucceed) {
+				// Hide the Basic CC because its functionality is exposed through another CC
+				this.removeCC(CommandClasses.Basic);
 			} else {
 				// Consider the device to control Basic CC, but only if we want to expose the currentValue
 				if (
@@ -1984,8 +2007,23 @@ protocol version:      ${this.protocolVersion}`;
 			if (endpoint.wasCCRemovedViaConfig(CommandClasses.Basic)) continue;
 			if (endpoint.getCCVersion(CommandClasses.Basic) === 0) continue;
 
-			if (endpoint.maySupportBasicCC()) {
+			const basicSetMappingTarget =
+				compat?.mapBasicSet === "Binary Sensor"
+					? CommandClasses["Binary Sensor"]
+					: compat?.mapBasicSet === "auto"
+					? getBasicMappingTarget(endpoint.deviceClass)
+					: undefined;
+
+			const basicSetMappingWillSucceed =
+				basicSetMappingTarget != undefined
+				&& endpoint.supportsCC(basicSetMappingTarget);
+
+			if (
+				endpoint.wasCCSupportAddedViaConfig(CommandClasses.Basic)
+				|| (endpoint.maySupportBasicCC() && !basicSetMappingWillSucceed)
+			) {
 				// The endpoint probably supports Basic CC and is allowed to.
+				// Or we force-added support through a config file.
 				// Interview the Basic CC to figure out if it actually supports it
 				this.driver.controllerLog.logNode(this.id, {
 					endpoint: endpoint.index,
@@ -1999,6 +2037,9 @@ protocol version:      ${this.protocolVersion}`;
 					true,
 				);
 				if (typeof action === "boolean") return action;
+			} else if (basicSetMappingWillSucceed) {
+				// Hide the Basic CC because its functionality is exposed through another CC
+				endpoint.removeCC(CommandClasses.Basic);
 			} else {
 				// Consider the device to control Basic CC, but only if we want to expose the currentValue
 				if (
@@ -2174,7 +2215,10 @@ protocol version:      ${this.protocolVersion}`;
 				});
 
 				try {
-					await cc.refreshValues(this.driver);
+					await cc.refreshValues(
+						this.driver,
+						{ priority: MessagePriority.Poll },
+					);
 				} catch (e) {
 					this.driver.controllerLog.logNode(this.id, {
 						message: `failed to refresh values for ${

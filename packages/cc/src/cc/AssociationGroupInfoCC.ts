@@ -1,4 +1,3 @@
-import type { CCEncodingContext, CCParsingContext } from "@zwave-js/cc";
 import {
 	CommandClasses,
 	type EndpointId,
@@ -23,6 +22,7 @@ import {
 	type InterviewContext,
 	type PersistValuesContext,
 	type RefreshValuesContext,
+	type RefreshValuesOptions,
 } from "../lib/CommandClass.js";
 import {
 	API,
@@ -38,6 +38,7 @@ import {
 	AssociationGroupInfoCommand,
 	AssociationGroupInfoProfile,
 } from "../lib/_Types.js";
+import type { CCEncodingContext, CCParsingContext } from "../lib/traits.js";
 import { AssociationCC } from "./AssociationCC.js";
 import { MultiChannelAssociationCC } from "./MultiChannelAssociationCC.js";
 
@@ -407,6 +408,7 @@ export class AssociationGroupInfoCC extends CommandClass {
 
 	public async refreshValues(
 		ctx: RefreshValuesContext,
+		options?: RefreshValuesOptions,
 	): Promise<void> {
 		const node = this.getNode(ctx)!;
 		const endpoint = this.getEndpoint(ctx)!;
@@ -414,7 +416,9 @@ export class AssociationGroupInfoCC extends CommandClass {
 			CommandClasses["Association Group Information"],
 			ctx,
 			endpoint,
-		).withOptions({ priority: MessagePriority.NodeQuery });
+		).withOptions({
+			priority: options?.priority ?? MessagePriority.NodeQuery,
+		});
 
 		// Query the information for each group (this is the only thing that could be dynamic)
 		const associationGroupCount = AssociationGroupInfoCC

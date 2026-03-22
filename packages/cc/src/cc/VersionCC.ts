@@ -1,4 +1,3 @@
-import type { CCEncodingContext, CCParsingContext } from "@zwave-js/cc";
 import {
 	CommandClasses,
 	type GetValueDB,
@@ -44,6 +43,7 @@ import {
 } from "../lib/CommandClassDecorators.js";
 import { V } from "../lib/Values.js";
 import { VersionCommand } from "../lib/_Types.js";
+import type { CCEncodingContext, CCParsingContext } from "../lib/traits.js";
 
 export const VersionCCValues = V.defineCCValues(CommandClasses.Version, {
 	...V.staticProperty(
@@ -52,7 +52,7 @@ export const VersionCCValues = V.defineCCValues(CommandClasses.Version, {
 			...ValueMetadata.ReadOnly,
 			type: "string[]",
 			label: "Z-Wave chip firmware versions",
-		} as const,
+		},
 		{ supportsEndpoints: false },
 	),
 	...V.staticProperty(
@@ -61,7 +61,7 @@ export const VersionCCValues = V.defineCCValues(CommandClasses.Version, {
 			...ValueMetadata.ReadOnlyNumber,
 			label: "Library type",
 			states: enumValuesToMetadataStates(ZWaveLibraryTypes),
-		} as const,
+		},
 		{ supportsEndpoints: false },
 	),
 	...V.staticProperty(
@@ -69,7 +69,7 @@ export const VersionCCValues = V.defineCCValues(CommandClasses.Version, {
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Z-Wave protocol version",
-		} as const,
+		},
 		{ supportsEndpoints: false },
 	),
 	...V.staticProperty(
@@ -77,11 +77,11 @@ export const VersionCCValues = V.defineCCValues(CommandClasses.Version, {
 		{
 			...ValueMetadata.ReadOnlyNumber,
 			label: "Z-Wave chip hardware version",
-		} as const,
+		},
 		{
 			minVersion: 2,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"supportsZWaveSoftwareGet",
@@ -89,40 +89,40 @@ export const VersionCCValues = V.defineCCValues(CommandClasses.Version, {
 		{
 			minVersion: 3,
 			internal: true,
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"sdkVersion",
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "SDK version",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"applicationFrameworkAPIVersion",
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Z-Wave application framework API version",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"applicationFrameworkBuildNumber",
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Z-Wave application framework API build number",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticPropertyWithName(
 		"serialAPIVersion",
@@ -130,11 +130,11 @@ export const VersionCCValues = V.defineCCValues(CommandClasses.Version, {
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Serial API version",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticPropertyWithName(
 		"serialAPIBuildNumber",
@@ -142,55 +142,55 @@ export const VersionCCValues = V.defineCCValues(CommandClasses.Version, {
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Serial API build number",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"zWaveProtocolVersion",
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Z-Wave protocol version",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"zWaveProtocolBuildNumber",
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Z-Wave protocol build number",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"applicationVersion",
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Application version",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"applicationBuildNumber",
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Application build number",
-		} as const,
+		},
 		{
 			minVersion: 3,
 			supportsEndpoints: false,
-		} as const,
+		},
 	),
 });
 

@@ -1,4 +1,3 @@
-import type { CCEncodingContext, CCParsingContext } from "@zwave-js/cc";
 import type { GetDeviceConfig } from "@zwave-js/config";
 import {
 	CommandClasses,
@@ -63,6 +62,7 @@ import {
 	type InterviewContext,
 	type PersistValuesContext,
 	type RefreshValuesContext,
+	type RefreshValuesOptions,
 	getEffectiveCCVersion,
 } from "../lib/CommandClass.js";
 import {
@@ -78,6 +78,7 @@ import {
 } from "../lib/CommandClassDecorators.js";
 import { V } from "../lib/Values.js";
 import { MeterCommand, type MeterReading, RateType } from "../lib/_Types.js";
+import type { CCEncodingContext, CCParsingContext } from "../lib/traits.js";
 
 export const MeterCCValues = V.defineCCValues(CommandClasses.Meter, {
 	...V.staticProperty("type", undefined, { internal: true }),
@@ -95,7 +96,7 @@ export const MeterCCValues = V.defineCCValues(CommandClasses.Meter, {
 			states: {
 				true: "Reset",
 			},
-		} as const,
+		},
 	),
 	...V.dynamicPropertyAndKeyWithName(
 		"resetSingle",
@@ -122,7 +123,7 @@ export const MeterCCValues = V.defineCCValues(CommandClasses.Meter, {
 				rateType,
 				scale,
 			},
-		} as const),
+		}),
 	),
 	...V.dynamicPropertyAndKeyWithName(
 		"value",
@@ -138,7 +139,7 @@ export const MeterCCValues = V.defineCCValues(CommandClasses.Meter, {
 				rateType,
 				scale,
 			},
-		} as const),
+		}),
 	),
 });
 
@@ -699,6 +700,7 @@ supports reset:       ${suppResp.supportsReset}`;
 
 	public async refreshValues(
 		ctx: RefreshValuesContext,
+		options?: RefreshValuesOptions,
 	): Promise<void> {
 		const node = this.getNode(ctx)!;
 		const endpoint = this.getEndpoint(ctx)!;
@@ -707,7 +709,7 @@ supports reset:       ${suppResp.supportsReset}`;
 			ctx,
 			endpoint,
 		).withOptions({
-			priority: MessagePriority.NodeQuery,
+			priority: options?.priority ?? MessagePriority.NodeQuery,
 		});
 
 		if (api.version === 1) {

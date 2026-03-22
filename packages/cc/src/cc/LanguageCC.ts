@@ -1,4 +1,3 @@
-import type { CCEncodingContext, CCParsingContext } from "@zwave-js/cc";
 import {
 	CommandClasses,
 	type GetValueDB,
@@ -21,6 +20,7 @@ import {
 	CommandClass,
 	type InterviewContext,
 	type RefreshValuesContext,
+	type RefreshValuesOptions,
 } from "../lib/CommandClass.js";
 import {
 	API,
@@ -34,6 +34,7 @@ import {
 } from "../lib/CommandClassDecorators.js";
 import { V } from "../lib/Values.js";
 import { LanguageCommand } from "../lib/_Types.js";
+import type { CCEncodingContext, CCParsingContext } from "../lib/traits.js";
 
 export const LanguageCCValues = V.defineCCValues(CommandClasses.Language, {
 	...V.staticProperty(
@@ -41,14 +42,14 @@ export const LanguageCCValues = V.defineCCValues(CommandClasses.Language, {
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Language code",
-		} as const,
+		},
 	),
 	...V.staticProperty(
 		"country",
 		{
 			...ValueMetadata.ReadOnlyString,
 			label: "Country code",
-		} as const,
+		},
 	),
 });
 
@@ -125,6 +126,7 @@ export class LanguageCC extends CommandClass {
 
 	public async refreshValues(
 		ctx: RefreshValuesContext,
+		options?: RefreshValuesOptions,
 	): Promise<void> {
 		const node = this.getNode(ctx)!;
 		const endpoint = this.getEndpoint(ctx)!;
@@ -133,7 +135,7 @@ export class LanguageCC extends CommandClass {
 			ctx,
 			endpoint,
 		).withOptions({
-			priority: MessagePriority.NodeQuery,
+			priority: options?.priority ?? MessagePriority.NodeQuery,
 		});
 
 		ctx.logNode(node.id, {
