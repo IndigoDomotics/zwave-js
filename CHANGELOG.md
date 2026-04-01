@@ -4,6 +4,36 @@
 <!--
 	Add placeholder for next release with `wip` snippet
 -->
+## 15.22.5 (2026-03-30)
+### Bugfixes
+* Fixed unwanted delays in `Node.pollValue` called by user/application code (#8726)
+
+### Config file changes
+* Add new product type for Shelly Wave PM Mini, FW 12.0 (#8708)
+
+## 15.22.4 (2026-03-26)
+### Bugfixes
+* Parse multiline command descriptions from end device CLI correctly (#8719)
+
+## 15.22.3 (2026-03-26)
+### Bugfixes
+* Handle commands with args in end device CLI client (#8715)
+
+## 15.22.2 (2026-03-24)
+### Bugfixes
+* If the driver was initialized with the option `bootloaderMode: "stay"`, it will now also stay in bootloader mode after a successful firmware update (#8714)
+* Fixed a check during Zniffer initialization that would reject a custom serial port binding (#8712)
+
+## 15.22.1 (2026-03-23)
+### Bugfixes
+* Fixed an issue where `targetValue` was not updated optimistically on slow devices after the command was accepted (#8711)
+
+### Config file changes
+* Warnings about problematic firmware versions are now shown based on the SDK version of the device, instead of the manufacturer-defined firmware version (#8709)
+
+### Changes under the hood
+* We now use the upcoming native port of the TypeScript compiler for much faster builds (#7954)
+
 ## 15.22.0 (2026-03-18)
 ### Features
 * Support remapping notifications (#8667, #8668)

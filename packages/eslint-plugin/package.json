@@ -1,6 +1,6 @@
 {
   "name": "@zwave-js/eslint-plugin",
-  "version": "15.22.0",
+  "version": "15.22.1",
   "description": "zwave-js: custom ESLint rules",
   "private": true,
   "keywords": [],
@@ -38,7 +38,7 @@
   "devDependencies": {
     "@alcalzone/esm2cjs": "^1.4.2",
     "@typescript-eslint/utils": "^8.57.1",
-    "@typescript/native-preview": "7.0.0-dev.20260318.1",
+    "@typescript/native-preview": "7.0.0-dev.20260324.1",
     "@zwave-js/core": "workspace:*",
     "eslint-plugin-jsonc": "^3.1.2",
     "typescript": "5.9.3"

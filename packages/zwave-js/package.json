@@ -1,6 +1,6 @@
 {
   "name": "zwave-js",
-  "version": "15.22.0",
+  "version": "15.22.5",
   "description": "Z-Wave driver written entirely in JavaScript/TypeScript",
   "keywords": [],
   "type": "module",
@@ -158,11 +158,11 @@
     "@types/semver": "^7.7.1",
     "@types/sinon": "^21.0.0",
     "@types/source-map-support": "^0.5.10",
-    "@typescript/native-preview": "7.0.0-dev.20260318.1",
+    "@typescript/native-preview": "7.0.0-dev.20260324.1",
     "@zwave-js/maintenance": "workspace:*",
     "del-cli": "^7.0.0",
     "mockdate": "^3.0.5",
-    "sinon": "^21.0.1",
+    "sinon": "^21.0.3",
     "tsx": "^4.21.0",
     "vitest": "^4.1.0"
   }
