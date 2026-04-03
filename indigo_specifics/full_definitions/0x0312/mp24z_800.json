@@ -1,0 +1,156 @@
+{
+  "manufacturer": "Minoston",
+  "manufacturerId": "0x0312",
+  "label": "MP24Z",
+  "description": "Outdoor Smart Plug - 2 Outlet (800S)",
+  "devices": [
+    {
+      "productType": "0xff01",
+      "productId": "0xff97",
+      "zwaveAllianceId": 3719
+    }
+  ],
+  "firmwareVersion": {
+    "min": "0.0",
+    "max": "255.255"
+  },
+  "paramInformation": [
+    {
+      "label": "LED Indicator",
+      "valueSize": 1,
+      "defaultValue": 0,
+      "allowManualEntry": false,
+      "options": [
+        {
+          "label": "On when load is on",
+          "value": 0
+        },
+        {
+          "label": "On when load is off",
+          "value": 1
+        },
+        {
+          "label": "Always off",
+          "value": 2
+        }
+      ],
+      "#": "1"
+    },
+    {
+      "valueSize": 4,
+      "minValue": 0,
+      "maxValue": 65535,
+      "defaultValue": 0,
+      "unsigned": true,
+      "$purpose": "timer.auto_off",
+      "label": "Outlet 1 (Left): Auto Off Timer",
+      "unit": "minutes",
+      "options": [
+        {
+          "label": "Disable",
+          "value": 0
+        }
+      ],
+      "#": "2"
+    },
+    {
+      "valueSize": 4,
+      "minValue": 0,
+      "maxValue": 65535,
+      "defaultValue": 0,
+      "unsigned": true,
+      "$purpose": "timer.auto_off",
+      "label": "Outlet 2 (Right): Auto Off Timer",
+      "unit": "minutes",
+      "options": [
+        {
+          "label": "Disable",
+          "value": 0
+        }
+      ],
+      "#": "3"
+    },
+    {
+      "valueSize": 4,
+      "minValue": 0,
+      "maxValue": 65535,
+      "defaultValue": 0,
+      "unsigned": true,
+      "$purpose": "timer.auto_on",
+      "label": "Outlet 1 (Left): Auto On Timer",
+      "unit": "minutes",
+      "options": [
+        {
+          "label": "Disable",
+          "value": 0
+        }
+      ],
+      "#": "4"
+    },
+    {
+      "valueSize": 4,
+      "minValue": 0,
+      "maxValue": 65535,
+      "defaultValue": 0,
+      "unsigned": true,
+      "$purpose": "timer.auto_on",
+      "label": "Outlet 2 (Right): Auto On Timer",
+      "unit": "minutes",
+      "options": [
+        {
+          "label": "Disable",
+          "value": 0
+        }
+      ],
+      "#": "5"
+    },
+    {
+      "$purpose": "state_after_power_failure",
+      "label": "State After Power Failure",
+      "valueSize": 1,
+      "defaultValue": 2,
+      "allowManualEntry": false,
+      "options": [
+        {
+          "label": "Always off",
+          "value": 0
+        },
+        {
+          "label": "Always on",
+          "value": 1
+        },
+        {
+          "label": "Previous state",
+          "value": 2
+        }
+      ],
+      "#": "6"
+    },
+    {
+      "label": "LED Indicator: Brightness",
+      "valueSize": 1,
+      "minValue": 0,
+      "maxValue": 2,
+      "defaultValue": 1,
+      "unsigned": true,
+      "allowManualEntry": false,
+      "options": [
+        {
+          "label": "High",
+          "value": 0
+        },
+        {
+          "label": "Medium",
+          "value": 1
+        },
+        {
+          "label": "Low",
+          "value": 2
+        }
+      ],
+      "#": "7"
+    }
+  ],
+  "vers": 1,
+  "last_update": "2026-04-02T17:55:42.371725"
+}

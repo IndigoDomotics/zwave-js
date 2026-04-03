@@ -3,7 +3,9 @@
 Resolve $import references in Z-Wave device configuration files.
 
 This script takes a manufacturer ID and device JSON file name, then resolves
-all $import references to produce a fully specified JSON configuration.
+all $import references to produce a fully specified JSON configuration. By
+default it will output the resolved file in the full_definitions directory,
+but this can be overridden with the -o option.
 
 Usage:
     python resolve_device_config.py <manufacturer_id> <device_filename> [-o <output_filename>]
