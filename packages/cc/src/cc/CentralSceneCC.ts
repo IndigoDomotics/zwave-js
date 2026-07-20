@@ -12,6 +12,9 @@ import {
 	ZWaveErrorCodes,
 	enumValuesToMetadataStates,
 	getCCName,
+	logDict,
+	logList,
+	logText,
 	maybeUnknownToString,
 	parseBitMask,
 	validatePayload,
@@ -223,6 +226,7 @@ export class CentralSceneCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -259,12 +263,15 @@ export class CentralSceneCC extends CommandClass {
 		});
 		const ccSupported = await api.getSupported();
 		if (ccSupported) {
-			const logMessage = `received supported scenes:
-# of scenes:           ${ccSupported.sceneCount}
-supports slow refresh: ${ccSupported.supportsSlowRefresh}`;
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
-				message: logMessage,
+				message: logText("received supported scenes:", {
+					nested: logDict({
+						"# of scenes": ccSupported.sceneCount,
+						"supports slow refresh":
+							ccSupported.supportsSlowRefresh,
+					}),
+				}),
 				direction: "inbound",
 			});
 		} else {
@@ -531,9 +538,9 @@ export class CentralSceneCCSupportedReport extends CentralSceneCC {
 			),
 		};
 		for (const [scene, keys] of this.supportedKeyAttributes) {
-			message[`supported attributes (scene #${scene})`] = keys
-				.map((k) => `\n· ${getEnumMemberName(CentralSceneKeys, k)}`)
-				.join("");
+			message[`supported attributes (scene #${scene})`] = logList(
+				keys.map((k) => getEnumMemberName(CentralSceneKeys, k)),
+			);
 		}
 		return {
 			...super.toLogEntry(ctx),

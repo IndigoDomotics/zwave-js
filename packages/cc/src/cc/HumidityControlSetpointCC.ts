@@ -14,6 +14,9 @@ import {
 	encodeFloatWithScale,
 	getNamedScale,
 	getUnknownScale,
+	logDict,
+	logList,
+	logText,
 	parseBitMask,
 	parseFloatWithScale,
 	supervisedCommandSucceeded,
@@ -355,6 +358,7 @@ export class HumidityControlSetpointCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -373,17 +377,18 @@ export class HumidityControlSetpointCC extends CommandClass {
 		const resp = await api.getSupportedSetpointTypes();
 		if (resp) {
 			setpointTypes = [...resp];
-			const logMessage = "received supported setpoint types:\n"
-				+ setpointTypes
-					.map((type) =>
-						getEnumMemberName(HumidityControlSetpointType, type)
-					)
-					.map((name) => `· ${name}`)
-					.join("\n");
-
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
-				message: logMessage,
+				message: logText("received supported setpoint types:", {
+					nested: logList(
+						setpointTypes.map((type) =>
+							getEnumMemberName(
+								HumidityControlSetpointType,
+								type,
+							)
+						),
+					),
+				}),
 				direction: "inbound",
 			});
 		} else {
@@ -410,16 +415,18 @@ export class HumidityControlSetpointCC extends CommandClass {
 			});
 			const setpointScaleSupported = await api.getSupportedScales(type);
 			if (setpointScaleSupported) {
-				const logMessage =
-					`received supported scales for setpoint ${setpointName}: 
-${
-						setpointScaleSupported
-							.map((t) => `\n· ${t.key} ${t.unit} - ${t.label}`)
-							.join("")
-					}`;
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
-					message: logMessage,
+					message: logText(
+						`received supported scales for setpoint ${setpointName}:`,
+						{
+							nested: logList(
+								setpointScaleSupported.map((t) =>
+									`${t.key} ${t.unit} - ${t.label}`
+								),
+							),
+						},
+					),
 					direction: "inbound",
 				});
 
@@ -442,20 +449,26 @@ ${
 				const maxValueUnit = getSetpointUnit(
 					setpointCaps.maxValueScale,
 				);
-				const logMessage =
-					`received capabilities for setpoint ${setpointName}:
-minimum value: ${setpointCaps.minValue} ${minValueUnit}
-maximum value: ${setpointCaps.maxValue} ${maxValueUnit}`;
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
-					message: logMessage,
+					message: logText(
+						`received capabilities for setpoint ${setpointName}:`,
+						{
+							nested: logDict({
+								"minimum value":
+									`${setpointCaps.minValue} ${minValueUnit}`,
+								"maximum value":
+									`${setpointCaps.maxValue} ${maxValueUnit}`,
+							}),
+						},
+					),
 					direction: "inbound",
 				});
 			}
 		}
 
 		// Query the current value for all setpoint types
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, { tag: "interview" });
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -473,6 +486,7 @@ maximum value: ${setpointCaps.maxValue} ${maxValueUnit}`;
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		const setpointTypes: HumidityControlSetpointType[] = this.getValue(
@@ -776,17 +790,14 @@ export class HumidityControlSetpointCCSupportedReport
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported setpoint types": this.supportedSetpointTypes
-					.map(
-						(t) =>
-							`\n· ${
-								getEnumMemberName(
-									HumidityControlSetpointType,
-									t,
-								)
-							}`,
-					)
-					.join(""),
+				"supported setpoint types": logList(
+					this.supportedSetpointTypes.map((t) =>
+						getEnumMemberName(
+							HumidityControlSetpointType,
+							t,
+						)
+					),
+				),
 			},
 		};
 	}
@@ -843,9 +854,11 @@ export class HumidityControlSetpointCCScaleSupportedReport
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"scale supported": supportedScales
-					.map((t) => `\n· ${t.key} ${t.unit} - ${t.label}`)
-					.join(""),
+				"scale supported": logList(
+					supportedScales.map((t) =>
+						`${t.key} ${t.unit} - ${t.label}`
+					),
+				),
 			},
 		};
 	}

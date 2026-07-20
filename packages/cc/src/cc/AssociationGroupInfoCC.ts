@@ -10,6 +10,9 @@ import {
 	type WithAddress,
 	encodeCCId,
 	getCCName,
+	logDict,
+	logList,
+	logText,
 	parseCCId,
 	validatePayload,
 } from "@zwave-js/core";
@@ -356,7 +359,10 @@ export class AssociationGroupInfoCC extends CommandClass {
 			CommandClasses["Association Group Information"],
 			ctx,
 			endpoint,
-		).withOptions({ priority: MessagePriority.NodeQuery });
+		).withOptions({
+			priority: MessagePriority.NodeQuery,
+			tag: "interview",
+		});
 
 		ctx.logNode(node.id, {
 			endpoint: this.endpointIndex,
@@ -397,10 +403,21 @@ export class AssociationGroupInfoCC extends CommandClass {
 			});
 			await api.getCommands(groupId);
 			// Not sure how to log this
+
+			// This loop and the info query in refreshValues() each iterate over all groups,
+			// so they make up the first and second half of this CC's interview progress.
+			node.reportInterviewProgress(groupId, 2 * associationGroupCount);
 		}
 
 		// Finally query each group for its information
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, {
+			tag: "interview",
+			onProgress: (completed) =>
+				node.reportInterviewProgress(
+					associationGroupCount + completed,
+					2 * associationGroupCount,
+				),
+		});
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -418,6 +435,7 @@ export class AssociationGroupInfoCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		// Query the information for each group (this is the only thing that could be dynamic)
@@ -440,21 +458,24 @@ export class AssociationGroupInfoCC extends CommandClass {
 			});
 			const info = await api.getGroupInfo(groupId, !!hasDynamicInfo);
 			if (info) {
-				const logMessage =
-					`Received info for association group #${groupId}:
-info is dynamic: ${info.hasDynamicInfo}
-profile:         ${
-						getEnumMemberName(
-							AssociationGroupInfoProfile,
-							info.profile,
-						)
-					}`;
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
-					message: logMessage,
+					message: logText(
+						`Received info for association group #${groupId}:`,
+						{
+							nested: logDict({
+								"info is dynamic": info.hasDynamicInfo,
+								profile: getEnumMemberName(
+									AssociationGroupInfoProfile,
+									info.profile,
+								),
+							}),
+						},
+					),
 					direction: "inbound",
 				});
 			}
+			options?.onProgress?.(groupId, associationGroupCount);
 		}
 	}
 }
@@ -483,6 +504,8 @@ export class AssociationGroupInfoCCNameReport extends AssociationGroupInfoCC {
 		validatePayload(raw.payload.length >= 2);
 		const groupId = raw.payload[0];
 		const nameLength = raw.payload[1];
+		// CC:0059.01.02.11.001: The Name Length field MUST be in the range 0..42
+		validatePayload(nameLength <= 42);
 		validatePayload(raw.payload.length >= 2 + nameLength);
 		// The specs don't allow 0-terminated string, but some devices use them
 		// So we need to cut them off
@@ -576,6 +599,7 @@ export class AssociationGroupInfoCCNameGet extends AssociationGroupInfoCC {
 	}
 }
 
+// @publicAPI
 export interface AssociationGroupInfo {
 	groupId: number;
 	mode: number;
@@ -677,19 +701,21 @@ export class AssociationGroupInfoCCInfoReport extends AssociationGroupInfoCC {
 	public toLogEntry(ctx?: GetValueDB): MessageOrCCLogEntry {
 		return {
 			...super.toLogEntry(ctx),
-			message: {
-				"is list mode": this.isListMode,
-				"has dynamic info": this.hasDynamicInfo,
-				groups: this.groups
-					.map(
-						(g) => `
-· Group #${g.groupId}
-  mode:       ${g.mode}
-  profile:    ${g.profile}
-  event code: ${g.eventCode}`,
-					)
-					.join(""),
-			},
+			message: logDict(
+				{
+					"is list mode": this.isListMode,
+					"has dynamic info": this.hasDynamicInfo,
+				},
+				this.groups.map((g) =>
+					logText(`Group #${g.groupId}`, {
+						nested: logDict({
+							mode: g.mode,
+							profile: g.profile,
+							"event code": g.eventCode,
+						}),
+					})
+				),
+			),
 		};
 	}
 }
@@ -851,15 +877,15 @@ export class AssociationGroupInfoCCCommandListReport
 			...super.toLogEntry(ctx),
 			message: {
 				"group id": this.groupId,
-				commands: [...this.commands]
-					.map(([cc, cmds]) => {
-						return `\n· ${getCCName(cc)}: ${
+				commands: logList(
+					[...this.commands].map(([cc, cmds]) =>
+						`${getCCName(cc)}: ${
 							cmds
 								.map((cmd) => num2hex(cmd))
 								.join(", ")
-						}`;
-					})
-					.join(""),
+						}`
+					),
+				),
 			},
 		};
 	}

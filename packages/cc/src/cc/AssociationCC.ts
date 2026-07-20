@@ -388,6 +388,7 @@ export class AssociationCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -424,7 +425,11 @@ export class AssociationCC extends CommandClass {
 		}
 
 		// Query each association group for its members
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, {
+			tag: "interview",
+			onProgress: (completed, total) =>
+				node.reportInterviewProgress(completed, total),
+		});
 
 		// Skip the remaining Association CC interview in favor of Multi Channel Association if possible
 		if (endpoint.supportsCC(CommandClasses["Multi Channel Association"])) {
@@ -457,6 +462,7 @@ export class AssociationCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		const groupCount = AssociationCC.getGroupCountCached(
@@ -483,6 +489,7 @@ currently assigned nodes: ${group.nodeIds.map(String).join(", ")}`;
 					direction: "inbound",
 				});
 			}
+			options?.onProgress?.(groupId, groupCount);
 		}
 	}
 }
@@ -552,7 +559,7 @@ export class AssociationCCSet extends AssociationCC {
 
 // @publicAPI
 export interface AssociationCCRemoveOptions {
-	/** The group from which to remove the nodes. If none is specified, the nodes will be removed from all nodes. */
+	/** The group from which to remove the nodes. If none is specified, the nodes will be removed from all groups. */
 	groupId?: number;
 	/** The nodes to remove. If none are specified, ALL nodes will be removed. */
 	nodeIds?: number[];
@@ -672,8 +679,8 @@ export class AssociationCCReport extends AssociationCC {
 		return { groupId: this.groupId };
 	}
 
-	public expectMoreMessages(): boolean {
-		return this.reportsToFollow > 0;
+	public getRemainingSegments(): number | undefined {
+		return this.reportsToFollow;
 	}
 
 	public mergePartialCCs(

@@ -35,6 +35,8 @@ import {
 	getNotificationValue,
 	getNotificationValueName,
 	isZWaveError,
+	logList,
+	logText,
 	parseBitMask,
 	timespan,
 	validatePayload,
@@ -605,6 +607,7 @@ export class NotificationCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -663,11 +666,10 @@ export class NotificationCC extends CommandClass {
 				readonly number[]
 			>();
 
-			const logMessage = `received supported notification types:${
-				supportedNotificationNames
-					.map((name) => `\n· ${name}`)
-					.join("")
-			}`;
+			const logMessage = logText(
+				"received supported notification types:",
+				{ nested: logList(supportedNotificationNames) },
+			);
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
 				message: logMessage,
@@ -700,6 +702,11 @@ export class NotificationCC extends CommandClass {
 							direction: "inbound",
 						});
 					}
+
+					node.reportInterviewProgress(
+						i + 1,
+						supportedNotificationTypes.length,
+					);
 				}
 			}
 
@@ -722,10 +729,18 @@ export class NotificationCC extends CommandClass {
 			}
 
 			if (notificationMode === "pull") {
-				await this.refreshValues(ctx);
+				await this.refreshValues(ctx, {
+					tag: "interview",
+					onProgress: (completed, total) =>
+						node.reportInterviewProgress(completed, total),
+				});
 			} /* if (notificationMode === "push") */ else {
 				// First, query the current state of each supported notification
-				await this.refreshValues(ctx);
+				await this.refreshValues(ctx, {
+					tag: "interview",
+					onProgress: (completed, total) =>
+						node.reportInterviewProgress(completed, total),
+				});
 
 				for (let i = 0; i < supportedNotificationTypes.length; i++) {
 					const type = supportedNotificationTypes[i];
@@ -738,6 +753,11 @@ export class NotificationCC extends CommandClass {
 						direction: "outbound",
 					});
 					await api.set(type, true);
+
+					node.reportInterviewProgress(
+						i + 1,
+						supportedNotificationTypes.length,
+					);
 				}
 			}
 		}
@@ -772,8 +792,28 @@ export class NotificationCC extends CommandClass {
 			?.compat?.alarmMapping;
 		if (!mappings) return;
 
-		// Find all mappings to a valid notification variable
+		const node = this.getNode(ctx)!;
 		const supportedNotifications = new Map<number, Set<number>>();
+		// Preserve the notification types and events discovered during the interview
+		for (
+			const type of (this.getValue<readonly number[]>(
+				ctx,
+				NotificationCCValues.supportedNotificationTypes,
+			) ?? [])
+		) {
+			supportedNotifications.set(
+				type,
+				new Set(
+					NotificationCC.getSupportedNotificationEvents(
+						ctx,
+						node,
+						type,
+					) ?? [],
+				),
+			);
+		}
+
+		// Find all mappings to a valid notification variable
 		for (const { to } of mappings) {
 			const notification = getNotification(to.notificationType);
 			if (!notification) continue;
@@ -961,7 +1001,7 @@ export class NotificationCC extends CommandClass {
 			// Find all variables that are supported by this node and have an idle state
 			for (
 				const variable of notification.variables
-					.filter((v) => !!v.idle)
+					.filter((v) => v.idle)
 			) {
 				if (
 					[...variable.states.keys()].some((key) =>
@@ -1004,6 +1044,7 @@ export class NotificationCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		// Load supported notification types and events from cache
@@ -1036,6 +1077,8 @@ export class NotificationCC extends CommandClass {
 				// @ts-expect-error
 				await node.handleCommand(response);
 			}
+
+			options?.onProgress?.(i + 1, supportedNotificationTypes.length);
 		}
 
 		// Remember when we did this
@@ -1416,11 +1459,10 @@ export class NotificationCCReport extends NotificationCC {
 			} else if (this.eventParameters instanceof Duration) {
 				message["event parameters"] = this.eventParameters.toString();
 			} else {
-				message["event parameters"] = Object.entries(
-					this.eventParameters,
-				)
-					.map(([param, val]) => `\n  ${param}: ${num2hex(val)}`)
-					.join("");
+				message["event parameters"] = logList(
+					Object.entries(this.eventParameters)
+						.map(([param, val]) => `${param}: ${num2hex(val)}`),
+				);
 			}
 		} else if (
 			valueConfig?.parameter?.type === "enum"
@@ -1584,6 +1626,13 @@ export class NotificationCCReport extends NotificationCC {
 			if (!isUint8Array(this.eventParameters)) {
 				return;
 			}
+			// readUIntBE supports at most 6 bytes; a longer (or empty) value
+			// must not reach it, or it throws a RangeError that would escape
+			// the parser and crash the driver
+			validatePayload(
+				this.eventParameters.length >= 1
+					&& this.eventParameters.length <= 6,
+			);
 			// The parameters contain a named value
 			this.eventParameters = {
 				[valueConfig.parameter.propertyName]: Bytes.view(
@@ -1830,11 +1879,11 @@ export class NotificationCCSupportedReport extends NotificationCC {
 			...super.toLogEntry(ctx),
 			message: {
 				"supports V1 alarm": this.supportsV1Alarm,
-				"supported notification types": this.supportedNotificationTypes
-					.map(
-						(t) => `\n· ${getNotificationName(t)}`,
-					)
-					.join(""),
+				"supported notification types": logList(
+					this.supportedNotificationTypes.map(
+						(t) => getNotificationName(t),
+					),
+				),
 			},
 		};
 	}
@@ -1971,17 +2020,15 @@ export class NotificationCCEventSupportedReport extends NotificationCC {
 			...super.toLogEntry(ctx),
 			message: {
 				"notification type": getNotificationName(this.notificationType),
-				"supported events": this.supportedEvents
-					.map(
+				"supported events": logList(
+					this.supportedEvents.map(
 						(e) =>
-							`\n· ${
-								getNotificationValueName(
-									this.notificationType,
-									e,
-								)
-							}`,
-					)
-					.join(""),
+							getNotificationValueName(
+								this.notificationType,
+								e,
+							),
+					),
+				),
 			},
 		};
 	}

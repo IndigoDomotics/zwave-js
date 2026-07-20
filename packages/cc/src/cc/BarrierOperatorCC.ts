@@ -15,6 +15,8 @@ import {
 	ZWaveError,
 	ZWaveErrorCodes,
 	enumValuesToMetadataStates,
+	logList,
+	logText,
 	maybeUnknownToString,
 	parseBitMask,
 	validatePayload,
@@ -436,6 +438,7 @@ export class BarrierOperatorCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -454,13 +457,11 @@ export class BarrierOperatorCC extends CommandClass {
 		const resp = await api.getSignalingCapabilities();
 		if (resp) {
 			ctx.logNode(node.id, {
-				message: `Received supported subsystem types: ${
-					resp
-						.map((t) =>
-							`\n· ${getEnumMemberName(SubsystemType, t)}`
-						)
-						.join("")
-				}`,
+				message: logText("Received supported subsystem types:", {
+					nested: logList(
+						resp.map((t) => getEnumMemberName(SubsystemType, t)),
+					),
+				}),
 				direction: "inbound",
 			});
 
@@ -484,7 +485,7 @@ export class BarrierOperatorCC extends CommandClass {
 			}
 		}
 
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, { tag: "interview" });
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -502,6 +503,7 @@ export class BarrierOperatorCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		const supportedSubsystems: SubsystemType[] = this.getValue(
@@ -735,9 +737,11 @@ export class BarrierOperatorCCSignalingCapabilitiesReport
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported types": this.supportedSubsystemTypes
-					.map((t) => `\n· ${getEnumMemberName(SubsystemType, t)}`)
-					.join(""),
+				"supported types": logList(
+					this.supportedSubsystemTypes.map((t) =>
+						getEnumMemberName(SubsystemType, t)
+					),
+				),
 			},
 		};
 	}
@@ -831,6 +835,10 @@ export class BarrierOperatorCCEventSignalingReport extends BarrierOperatorCC {
 		validatePayload(raw.payload.length >= 2);
 		const subsystemType: SubsystemType = raw.payload[0];
 		const subsystemState: SubsystemState = raw.payload[1];
+		validatePayload(
+			isEnumMember(SubsystemType, subsystemType),
+			isEnumMember(SubsystemState, subsystemState),
+		);
 
 		return new this({
 			nodeId: ctx.sourceNodeId,

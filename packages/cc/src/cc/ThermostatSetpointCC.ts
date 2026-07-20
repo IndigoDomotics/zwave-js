@@ -15,6 +15,8 @@ import {
 	encodeFloatWithScale,
 	getNamedScale,
 	getUnknownScale,
+	logList,
+	logText,
 	parseBitMask,
 	parseFloatWithScale,
 	supervisedCommandSucceeded,
@@ -346,6 +348,7 @@ export class ThermostatSetpointCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -409,6 +412,13 @@ export class ThermostatSetpointCC extends CommandClass {
 					message: logMessage,
 					direction: "inbound",
 				});
+
+				node.reportInterviewProgress(
+					type - ThermostatSetpointType.Heating + 1,
+					ThermostatSetpointType["Full Power"]
+						- ThermostatSetpointType.Heating
+						+ 1,
+				);
 			}
 
 			// Remember which setpoint types are actually supported
@@ -430,13 +440,16 @@ export class ThermostatSetpointCC extends CommandClass {
 			const resp = await api.getSupportedSetpointTypes();
 			if (resp) {
 				setpointTypes = [...resp];
-				const logMessage = "received supported setpoint types:\n"
-					+ setpointTypes
-						.map((type) =>
-							getEnumMemberName(ThermostatSetpointType, type)
-						)
-						.map((name) => `· ${name}`)
-						.join("\n");
+				const logMessage = logText(
+					"received supported setpoint types:",
+					{
+						nested: logList(
+							setpointTypes.map((type) =>
+								getEnumMemberName(ThermostatSetpointType, type)
+							),
+						),
+					},
+				);
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
 					message: logMessage,
@@ -452,7 +465,7 @@ export class ThermostatSetpointCC extends CommandClass {
 				return;
 			}
 
-			for (const type of setpointTypes) {
+			for (const [i, type] of setpointTypes.entries()) {
 				const setpointName = getEnumMemberName(
 					ThermostatSetpointType,
 					type,
@@ -482,10 +495,16 @@ maximum value: ${setpointCaps.maxValue} ${maxValueUnit}`;
 						direction: "inbound",
 					});
 				}
+
+				node.reportInterviewProgress(i + 1, setpointTypes.length);
 			}
 
 			// Query the current value for all setpoint types
-			await this.refreshValues(ctx);
+			await this.refreshValues(ctx, {
+				tag: "interview",
+				onProgress: (completed, total) =>
+					node.reportInterviewProgress(completed, total),
+			});
 		}
 
 		// Remember that the interview is complete
@@ -504,6 +523,7 @@ maximum value: ${setpointCaps.maxValue} ${maxValueUnit}`;
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		const setpointTypes: ThermostatSetpointType[] = this.getValue(
@@ -512,7 +532,7 @@ maximum value: ${setpointCaps.maxValue} ${maxValueUnit}`;
 		) ?? [];
 
 		// Query each setpoint's current value
-		for (const type of setpointTypes) {
+		for (const [i, type] of setpointTypes.entries()) {
 			const setpointName = getEnumMemberName(
 				ThermostatSetpointType,
 				type,
@@ -536,6 +556,8 @@ maximum value: ${setpointCaps.maxValue} ${maxValueUnit}`;
 					direction: "inbound",
 				});
 			}
+
+			options?.onProgress?.(i + 1, setpointTypes.length);
 		}
 	}
 }
@@ -983,17 +1005,14 @@ export class ThermostatSetpointCCSupportedReport extends ThermostatSetpointCC {
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported setpoint types": this.supportedSetpointTypes
-					.map(
-						(t) =>
-							`\n· ${
-								getEnumMemberName(
-									ThermostatSetpointType,
-									t,
-								)
-							}`,
-					)
-					.join(""),
+				"supported setpoint types": logList(
+					this.supportedSetpointTypes.map((t) =>
+						getEnumMemberName(
+							ThermostatSetpointType,
+							t,
+						)
+					),
+				),
 			},
 		};
 	}

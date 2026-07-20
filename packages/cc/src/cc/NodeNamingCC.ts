@@ -77,6 +77,7 @@ function decodeNodeTextPayload(raw: CCRaw): string {
 	validatePayload(raw.payload.length >= 1);
 	const encoding = raw.payload[0] === 2 ? "utf16le" : "ascii";
 	const textBuffer = raw.payload.subarray(1);
+	validatePayload(textBuffer.length <= 16);
 
 	if (encoding === "utf16le") {
 		validatePayload(textBuffer.length % 2 === 0);
@@ -254,7 +255,7 @@ export class NodeNamingAndLocationCC extends CommandClass {
 			direction: "none",
 		});
 
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, { tag: "interview" });
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -272,6 +273,7 @@ export class NodeNamingAndLocationCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		ctx.logNode(node.id, {
@@ -360,16 +362,7 @@ export class NodeNamingAndLocationCCNameReport extends NodeNamingAndLocationCC {
 		raw: CCRaw,
 		ctx: CCParsingContext,
 	): NodeNamingAndLocationCCNameReport {
-		validatePayload(raw.payload.length >= 1);
-		const encoding = raw.payload[0] === 2 ? "utf16le" : "ascii";
-		const nameBuffer = raw.payload.subarray(1);
-		let name: string;
-		if (encoding === "utf16le") {
-			validatePayload(nameBuffer.length % 2 === 0);
-			name = uint8ArrayToStringUTF16BE(nameBuffer);
-		} else {
-			name = nameBuffer.toString("ascii");
-		}
+		const name = decodeNodeTextPayload(raw);
 
 		return new this({
 			nodeId: ctx.sourceNodeId,
@@ -460,16 +453,7 @@ export class NodeNamingAndLocationCCLocationReport
 		raw: CCRaw,
 		ctx: CCParsingContext,
 	): NodeNamingAndLocationCCLocationReport {
-		validatePayload(raw.payload.length >= 1);
-		const encoding = raw.payload[0] === 2 ? "utf16le" : "ascii";
-		const locationBuffer = raw.payload.subarray(1);
-		let location: string;
-		if (encoding === "utf16le") {
-			validatePayload(locationBuffer.length % 2 === 0);
-			location = uint8ArrayToStringUTF16BE(locationBuffer);
-		} else {
-			location = locationBuffer.toString("ascii");
-		}
+		const location = decodeNodeTextPayload(raw);
 
 		return new this({
 			nodeId: ctx.sourceNodeId,

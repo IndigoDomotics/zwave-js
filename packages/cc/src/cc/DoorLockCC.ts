@@ -8,11 +8,16 @@ import {
 	MessagePriority,
 	type MessageRecord,
 	type SupervisionResult,
+	SupervisionStatus,
 	ValueMetadata,
 	type WithAddress,
 	ZWaveError,
 	ZWaveErrorCodes,
+	encodeBitMask,
 	enumValuesToMetadataStates,
+	logDict,
+	logList,
+	logText,
 	parseBitMask,
 	supervisedCommandSucceeded,
 	validatePayload,
@@ -26,7 +31,9 @@ import {
 	PhysicalCCAPI,
 	type PollValueImplementation,
 	SET_VALUE,
+	SET_VALUE_HOOKS,
 	type SetValueImplementation,
+	type SetValueImplementationHooksFactory,
 	throwUnsupportedProperty,
 	throwWrongValueType,
 } from "../lib/API.js";
@@ -349,21 +356,7 @@ export class DoorLockCCAPI extends PhysicalCCAPI {
 						typeof value,
 					);
 				}
-				const result = await this.set(value);
-
-				// Verify the current value after a delay, unless the command was supervised and successful
-				if (supervisedCommandSucceeded(result)) {
-					this.getValueDB().setValue(
-						DoorLockCCValues.currentMode.endpoint(
-							this.endpoint.index,
-						),
-						value,
-					);
-				} else {
-					this.schedulePoll({ property }, value);
-				}
-
-				return result;
+				return this.set(value);
 			} else if (
 				typeof property === "string"
 				&& configurationSetParameters.includes(property as any)
@@ -408,6 +401,64 @@ export class DoorLockCCAPI extends PhysicalCCAPI {
 			}
 		};
 	}
+
+	protected [SET_VALUE_HOOKS]: SetValueImplementationHooksFactory = (
+		{ property },
+		value,
+	) => {
+		if (property === "targetMode" && typeof value === "number") {
+			const targetMode = value;
+			const currentModeValueId = DoorLockCCValues.currentMode.endpoint(
+				this.endpoint.index,
+			);
+
+			return {
+				isSplitStateTargetValue: true,
+				supervisionDelayedUpdates: true,
+				optimisticallyUpdateRelatedValues: (
+					_supervisedAndSuccessful,
+				) => {
+					this.tryGetValueDB()?.setValue(
+						currentModeValueId,
+						targetMode,
+					);
+				},
+				supervisionOnSuccess: () => {
+					this.tryGetValueDB()?.setValue(
+						currentModeValueId,
+						targetMode,
+					);
+				},
+				supervisionOnFailure: async () => {
+					try {
+						await this.get();
+					} catch {
+						// ignore
+					}
+				},
+				verifyChanges: async (result) => {
+					switch (result?.status) {
+						case SupervisionStatus.Success:
+						case SupervisionStatus.Working:
+							return;
+						case SupervisionStatus.Fail:
+						case SupervisionStatus.NoSupport:
+							try {
+								await this.get();
+							} catch {
+								// ignore
+							}
+							return;
+						default:
+							this.schedulePoll(
+								{ property: "currentMode" },
+								targetMode,
+							);
+					}
+				},
+			};
+		}
+	};
 
 	protected get [POLL_VALUE](): PollValueImplementation {
 		return async function(this: DoorLockCCAPI, { property }) {
@@ -588,6 +639,7 @@ export class DoorLockCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -613,34 +665,40 @@ export class DoorLockCC extends CommandClass {
 			});
 			const resp = await api.getCapabilities();
 			if (resp) {
-				const logMessage = `received lock capabilities:
-supported operation types: ${
-					resp.supportedOperationTypes
-						.map((t) => getEnumMemberName(DoorLockOperationType, t))
-						.join(", ")
-				}
-supported door lock modes: ${
-					resp.supportedDoorLockModes
-						.map((t) => getEnumMemberName(DoorLockMode, t))
-						.map((str) => `\n· ${str}`)
-						.join("")
-				}
-supported outside handles: ${
-					resp.supportedOutsideHandles
-						.map(String)
-						.join(", ")
-				}
-supported inside handles:  ${resp.supportedInsideHandles.map(String).join(", ")}
-supports door status:      ${resp.doorSupported}
-supports bolt status:      ${resp.boltSupported}
-supports latch status:     ${resp.latchSupported}
-supports auto-relock:      ${resp.autoRelockSupported}
-supports hold-and-release: ${resp.holdAndReleaseSupported}
-supports twist assist:     ${resp.twistAssistSupported}
-supports block to block:   ${resp.blockToBlockSupported}`;
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
-					message: logMessage,
+					message: logText("received lock capabilities:", {
+						nested: logDict({
+							"supported operation types": resp
+								.supportedOperationTypes
+								.map((t) =>
+									getEnumMemberName(DoorLockOperationType, t)
+								)
+								.join(", "),
+							"supported door lock modes": logList(
+								resp.supportedDoorLockModes.map((t) =>
+									getEnumMemberName(DoorLockMode, t)
+								),
+							),
+							"supported outside handles": resp
+								.supportedOutsideHandles
+								.map(String)
+								.join(", "),
+							"supported inside handles": resp
+								.supportedInsideHandles
+								.map(String)
+								.join(", "),
+							"supports door status": resp.doorSupported,
+							"supports bolt status": resp.boltSupported,
+							"supports latch status": resp.latchSupported,
+							"supports auto-relock": resp.autoRelockSupported,
+							"supports hold-and-release":
+								resp.holdAndReleaseSupported,
+							"supports twist assist": resp.twistAssistSupported,
+							"supports block to block":
+								resp.blockToBlockSupported,
+						}),
+					}),
 					direction: "inbound",
 				});
 
@@ -698,7 +756,7 @@ supports block to block:   ${resp.blockToBlockSupported}`;
 			);
 		}
 
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, { tag: "interview" });
 
 		// Remember that the interview is complete
 		if (!hadCriticalTimeout) this.setInterviewComplete(ctx, true);
@@ -716,6 +774,7 @@ supports block to block:   ${resp.blockToBlockSupported}`;
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		ctx.logNode(node.id, {
@@ -725,40 +784,40 @@ supports block to block:   ${resp.blockToBlockSupported}`;
 		});
 		const config = await api.getConfiguration();
 		if (config) {
-			let logMessage = `received lock configuration:
-operation type:                ${
-				getEnumMemberName(
-					DoorLockOperationType,
-					config.operationType,
-				)
-			}`;
-			if (config.operationType === DoorLockOperationType.Timed) {
-				logMessage += `
-lock timeout:                  ${config.lockTimeoutConfiguration} seconds
-`;
-			}
-			logMessage += `
-outside handles can open door: ${
-				config.outsideHandlesCanOpenDoorConfiguration
-					.map(String)
-					.join(", ")
-			}
-inside handles can open door:  ${
-				config.insideHandlesCanOpenDoorConfiguration
-					.map(String)
-					.join(", ")
-			}`;
-			if (api.version >= 4) {
-				logMessage += `
-auto-relock time               ${config.autoRelockTime ?? "-"} seconds
-hold-and-release time          ${config.holdAndReleaseTime ?? "-"} seconds
-twist assist                   ${!!config.twistAssist}
-block to block                 ${!!config.blockToBlock}`;
-			}
-
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
-				message: logMessage,
+				message: logText("received lock configuration:", {
+					nested: logDict({
+						"operation type": getEnumMemberName(
+							DoorLockOperationType,
+							config.operationType,
+						),
+						"lock timeout": config.operationType
+								=== DoorLockOperationType.Timed
+							? `${config.lockTimeoutConfiguration} seconds`
+							: undefined,
+						"outside handles can open door": config
+							.outsideHandlesCanOpenDoorConfiguration
+							.map(String)
+							.join(", "),
+						"inside handles can open door": config
+							.insideHandlesCanOpenDoorConfiguration
+							.map(String)
+							.join(", "),
+						...(api.version >= 4
+							? {
+								"auto-relock time": `${
+									config.autoRelockTime ?? "-"
+								} seconds`,
+								"hold-and-release time": `${
+									config.holdAndReleaseTime ?? "-"
+								} seconds`,
+								"twist assist": !!config.twistAssist,
+								"block to block": !!config.blockToBlock,
+							}
+							: undefined),
+					}),
+				}),
 				direction: "inbound",
 			});
 		}
@@ -770,32 +829,33 @@ block to block                 ${!!config.blockToBlock}`;
 		});
 		const status = await api.get();
 		if (status) {
-			let logMessage = `received lock status:
-current mode:       ${getEnumMemberName(DoorLockMode, status.currentMode)}`;
-			if (status.targetMode != undefined) {
-				logMessage += `
-target mode:        ${getEnumMemberName(DoorLockMode, status.targetMode)}
-remaining duration: ${status.duration?.toString() ?? "undefined"}`;
-			}
-			if (status.lockTimeout != undefined) {
-				logMessage += `
-lock timeout:       ${status.lockTimeout} seconds`;
-			}
-			if (status.doorStatus != undefined) {
-				logMessage += `
-door status:        ${status.doorStatus}`;
-			}
-			if (status.boltStatus != undefined) {
-				logMessage += `
-bolt status:        ${status.boltStatus}`;
-			}
-			if (status.latchStatus != undefined) {
-				logMessage += `
-latch status:       ${status.latchStatus}`;
-			}
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
-				message: logMessage,
+				message: logText("received lock status:", {
+					nested: logDict({
+						"current mode": getEnumMemberName(
+							DoorLockMode,
+							status.currentMode,
+						),
+						...(status.targetMode != undefined
+							? {
+								"target mode": getEnumMemberName(
+									DoorLockMode,
+									status.targetMode,
+								),
+								"remaining duration":
+									status.duration?.toString()
+										?? "undefined",
+							}
+							: undefined),
+						"lock timeout": status.lockTimeout != undefined
+							? `${status.lockTimeout} seconds`
+							: undefined,
+						"door status": status.doorStatus,
+						"bolt status": status.boltStatus,
+						"latch status": status.latchStatus,
+					}),
+				}),
 				direction: "inbound",
 			});
 		}
@@ -920,18 +980,16 @@ export class DoorLockCCOperationSet extends DoorLockCC {
 	}
 
 	public static from(
-		_raw: CCRaw,
-		_ctx: CCParsingContext,
+		raw: CCRaw,
+		ctx: CCParsingContext,
 	): DoorLockCCOperationSet {
-		// TODO: Deserialize payload
-		throw new ZWaveError(
-			`${this.name}: deserialization not implemented`,
-			ZWaveErrorCodes.Deserialization_NotImplemented,
-		);
+		validatePayload(raw.payload.length >= 1);
+		const mode: DoorLockMode = raw.payload[0];
 
-		// return new DoorLockCCOperationSet({
-		// 	nodeId: ctx.sourceNodeId,
-		// });
+		return new this({
+			nodeId: ctx.sourceNodeId,
+			mode,
+		});
 	}
 
 	public mode: DoorLockMode;
@@ -1050,6 +1108,44 @@ export class DoorLockCCOperationReport extends DoorLockCC {
 			targetMode,
 			duration,
 		});
+	}
+
+	public serialize(ctx: CCEncodingContext): Promise<Bytes> {
+		const handles = [
+			...this.insideHandlesCanOpenDoor,
+			...this.outsideHandlesCanOpenDoor,
+		]
+			.map((val, i) => (val ? 1 << i : 0))
+			.reduce((acc, cur) => acc | cur, 0);
+
+		const doorCondition = (this.doorStatus === "closed" ? 0b1 : 0)
+			| (this.boltStatus === "unlocked" ? 0b10 : 0)
+			| (this.latchStatus === "closed" ? 0b100 : 0);
+
+		let lockTimeoutMinutes = 0xfe;
+		let lockTimeoutSeconds = 0xfe;
+		if (this.lockTimeout != undefined) {
+			lockTimeoutMinutes = Math.floor(this.lockTimeout / 60);
+			lockTimeoutSeconds = this.lockTimeout % 60;
+		}
+
+		const payload = [
+			this.currentMode,
+			handles,
+			doorCondition,
+			lockTimeoutMinutes,
+			lockTimeoutSeconds,
+		];
+
+		if (this.targetMode != undefined) {
+			payload.push(this.targetMode);
+			payload.push(
+				(this.duration ?? Duration.default()).serializeReport(),
+			);
+		}
+
+		this.payload = Bytes.from(payload);
+		return super.serialize(ctx);
 	}
 
 	public persistValues(ctx: PersistValuesContext): boolean {
@@ -1248,6 +1344,57 @@ export class DoorLockCCConfigurationReport extends DoorLockCC {
 		});
 	}
 
+	public serialize(ctx: CCEncodingContext): Promise<Bytes> {
+		const handles = [
+			...this.insideHandlesCanOpenDoorConfiguration,
+			...this.outsideHandlesCanOpenDoorConfiguration,
+		]
+			.map((val, i) => (val ? 1 << i : 0))
+			.reduce((acc, cur) => acc | cur, 0);
+
+		let lockTimeoutMinutes: number;
+		let lockTimeoutSeconds: number;
+		if (
+			this.operationType === DoorLockOperationType.Timed
+			&& this.lockTimeoutConfiguration != undefined
+		) {
+			lockTimeoutMinutes = Math.floor(
+				this.lockTimeoutConfiguration / 60,
+			);
+			lockTimeoutSeconds = this.lockTimeoutConfiguration % 60;
+		} else {
+			lockTimeoutMinutes = lockTimeoutSeconds = 0xfe;
+		}
+
+		const flags = (this.twistAssist ? 0b1 : 0)
+			| (this.blockToBlock ? 0b10 : 0);
+
+		this.payload = Bytes.from([
+			this.operationType,
+			handles,
+			lockTimeoutMinutes,
+			lockTimeoutSeconds,
+		]);
+
+		if (
+			this.autoRelockTime != undefined
+			|| this.holdAndReleaseTime != undefined
+			|| this.twistAssist != undefined
+			|| this.blockToBlock != undefined
+		) {
+			const extended = Bytes.alloc(5);
+			extended.writeUInt16BE((this.autoRelockTime ?? 0) & 0xffff, 0);
+			extended.writeUInt16BE(
+				(this.holdAndReleaseTime ?? 0) & 0xffff,
+				2,
+			);
+			extended[4] = flags;
+			this.payload = Bytes.concat([this.payload, extended]);
+		}
+
+		return super.serialize(ctx);
+	}
+
 	public readonly operationType: DoorLockOperationType;
 
 	public readonly outsideHandlesCanOpenDoorConfiguration: DoorHandleStatus;
@@ -1398,18 +1545,57 @@ export class DoorLockCCConfigurationSet extends DoorLockCC {
 	}
 
 	public static from(
-		_raw: CCRaw,
-		_ctx: CCParsingContext,
+		raw: CCRaw,
+		ctx: CCParsingContext,
 	): DoorLockCCConfigurationSet {
-		// TODO: Deserialize payload
-		throw new ZWaveError(
-			`${this.name}: deserialization not implemented`,
-			ZWaveErrorCodes.Deserialization_NotImplemented,
-		);
+		validatePayload(raw.payload.length >= 4);
+		const operationType: DoorLockOperationType = raw.payload[0];
+		const outsideHandlesCanOpenDoorConfiguration: DoorHandleStatus = [
+			!!(raw.payload[1] & 0b0001_0000),
+			!!(raw.payload[1] & 0b0010_0000),
+			!!(raw.payload[1] & 0b0100_0000),
+			!!(raw.payload[1] & 0b1000_0000),
+		];
+		const insideHandlesCanOpenDoorConfiguration: DoorHandleStatus = [
+			!!(raw.payload[1] & 0b0001),
+			!!(raw.payload[1] & 0b0010),
+			!!(raw.payload[1] & 0b0100),
+			!!(raw.payload[1] & 0b1000),
+		];
 
-		// return new DoorLockCCConfigurationSet({
-		// 	nodeId: ctx.sourceNodeId,
-		// });
+		let lockTimeoutConfiguration: number | undefined;
+		if (operationType === DoorLockOperationType.Timed) {
+			const lockTimeoutMinutes = raw.payload[2];
+			const lockTimeoutSeconds = raw.payload[3];
+			if (lockTimeoutMinutes <= 0xfd && lockTimeoutSeconds <= 59) {
+				lockTimeoutConfiguration = lockTimeoutSeconds
+					+ lockTimeoutMinutes * 60;
+			}
+		}
+
+		let autoRelockTime: number | undefined;
+		let holdAndReleaseTime: number | undefined;
+		let twistAssist: boolean | undefined;
+		let blockToBlock: boolean | undefined;
+		if (raw.payload.length >= 9) {
+			autoRelockTime = raw.payload.readUInt16BE(4);
+			holdAndReleaseTime = raw.payload.readUInt16BE(6);
+			const flags = raw.payload[8];
+			twistAssist = !!(flags & 0b1);
+			blockToBlock = !!(flags & 0b10);
+		}
+
+		return new this({
+			nodeId: ctx.sourceNodeId,
+			operationType,
+			outsideHandlesCanOpenDoorConfiguration,
+			insideHandlesCanOpenDoorConfiguration,
+			lockTimeoutConfiguration,
+			autoRelockTime,
+			holdAndReleaseTime,
+			twistAssist,
+			blockToBlock,
+		} as WithAddress<DoorLockCCConfigurationSetOptions>);
 	}
 
 	public operationType: DoorLockOperationType;
@@ -1653,6 +1839,44 @@ export class DoorLockCCCapabilitiesReport extends DoorLockCC {
 
 	public readonly blockToBlockSupported: boolean;
 
+	public serialize(ctx: CCEncodingContext): Promise<Bytes> {
+		// Operation type bitmask (variable length)
+		const operationTypeMask = encodeBitMask(
+			this.supportedOperationTypes,
+			undefined,
+			0,
+		);
+
+		// Door lock mode list
+		const modeList = Bytes.from(this.supportedDoorLockModes as number[]);
+
+		const handles = [
+			...this.supportedInsideHandles,
+			...this.supportedOutsideHandles,
+		]
+			.map((val, i) => (val ? 1 << i : 0))
+			.reduce((acc, cur) => acc | cur, 0);
+
+		const componentStatus = (this.doorSupported ? 0b1 : 0)
+			| (this.boltSupported ? 0b10 : 0)
+			| (this.latchSupported ? 0b100 : 0);
+
+		const featureFlags = (this.blockToBlockSupported ? 0b1 : 0)
+			| (this.twistAssistSupported ? 0b10 : 0)
+			| (this.holdAndReleaseSupported ? 0b100 : 0)
+			| (this.autoRelockSupported ? 0b1000 : 0);
+
+		this.payload = Bytes.concat([
+			[operationTypeMask.length & 0b11111],
+			operationTypeMask,
+			[modeList.length],
+			modeList,
+			[handles, componentStatus, featureFlags],
+		]);
+
+		return super.serialize(ctx);
+	}
+
 	public toLogEntry(ctx?: GetValueDB): MessageOrCCLogEntry {
 		return {
 			...super.toLogEntry(ctx),
@@ -1664,20 +1888,19 @@ export class DoorLockCCCapabilitiesReport extends DoorLockCC {
 				"twist assist feature": this.twistAssistSupported,
 				"hold-and-release feature": this.holdAndReleaseSupported,
 				"auto-relock feature": this.autoRelockSupported,
-				"operation types": this.supportedOperationTypes
-					.map(
-						(t) =>
-							`\n· ${
-								getEnumMemberName(
-									DoorLockOperationType,
-									t,
-								)
-							}`,
-					)
-					.join(""),
-				"door lock modes": this.supportedDoorLockModes
-					.map((t) => `\n· ${getEnumMemberName(DoorLockMode, t)}`)
-					.join(""),
+				"operation types": logList(
+					this.supportedOperationTypes.map((t) =>
+						getEnumMemberName(
+							DoorLockOperationType,
+							t,
+						)
+					),
+				),
+				"door lock modes": logList(
+					this.supportedDoorLockModes.map((t) =>
+						getEnumMemberName(DoorLockMode, t)
+					),
+				),
 				"outside handles": this.supportedOutsideHandles.join(", "),
 				"inside handles": this.supportedInsideHandles.join(", "),
 			},

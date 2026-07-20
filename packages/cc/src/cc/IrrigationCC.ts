@@ -14,6 +14,9 @@ import {
 	ZWaveErrorCodes,
 	encodeFloatWithScale,
 	enumValuesToMetadataStates,
+	logDict,
+	logList,
+	logText,
 	parseFloatWithScale,
 	validatePayload,
 } from "@zwave-js/core";
@@ -252,7 +255,7 @@ export const IrrigationCCValues = V.defineCCValues(CommandClasses.Irrigation, {
 			(typeof property === "number" || property === "master")
 			&& propertyKey === "nominalCurrent",
 		(valveId: ValveId) => ({
-			...ValueMetadata.ReadOnlyBoolean,
+			...ValueMetadata.ReadOnlyNumber,
 			label: `${
 				irrigationValveIdToMetadataPrefix(
 					valveId,
@@ -444,7 +447,7 @@ export const IrrigationCCValues = V.defineCCValues(CommandClasses.Irrigation, {
 				irrigationValveIdToMetadataPrefix(
 					valveId,
 				)
-			}: Error - Flow below high threshold`,
+			}: Error - Flow below low threshold`,
 		}),
 	),
 	...V.dynamicPropertyAndKeyWithName(
@@ -1125,6 +1128,7 @@ export class IrrigationCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -1148,14 +1152,16 @@ export class IrrigationCC extends CommandClass {
 			});
 			return;
 		}
-		const logMessage = `received irrigation system info:
-supports master valve: ${systemInfo.supportsMasterValve}
-no. of valves:         ${systemInfo.numValves}
-no. of valve tables:   ${systemInfo.numValveTables}
-max. valve table size: ${systemInfo.maxValveTableSize}`;
 		ctx.logNode(node.id, {
 			endpoint: this.endpointIndex,
-			message: logMessage,
+			message: logText("received irrigation system info:", {
+				nested: logDict({
+					"supports master valve": systemInfo.supportsMasterValve,
+					"no. of valves": systemInfo.numValves,
+					"no. of valve tables": systemInfo.numValveTables,
+					"max. valve table size": systemInfo.maxValveTableSize,
+				}),
+			}),
 			direction: "inbound",
 		});
 
@@ -1174,7 +1180,11 @@ max. valve table size: ${systemInfo.maxValveTableSize}`;
 		this.ensureMetadata(ctx, IrrigationCCValues.shutoffSystem);
 
 		// Query current values
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, {
+			tag: "interview",
+			onProgress: (completed, total) =>
+				node.reportInterviewProgress(completed, total),
+		});
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -1192,6 +1202,7 @@ max. valve table size: ${systemInfo.maxValveTableSize}`;
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		// Query the current system config
@@ -1202,31 +1213,35 @@ max. valve table size: ${systemInfo.maxValveTableSize}`;
 		});
 		const systemConfig = await api.getSystemConfig();
 		if (systemConfig) {
-			let logMessage = `received irrigation system configuration:
-master valve delay:       ${systemConfig.masterValveDelay} seconds
-high pressure threshold:  ${systemConfig.highPressureThreshold} kPa
-low pressure threshold:   ${systemConfig.lowPressureThreshold} kPa`;
-			if (systemConfig.rainSensorPolarity != undefined) {
-				logMessage += `
-rain sensor polarity:     ${
-					getEnumMemberName(
-						IrrigationSensorPolarity,
-						systemConfig.rainSensorPolarity,
-					)
-				}`;
-			}
-			if (systemConfig.moistureSensorPolarity != undefined) {
-				logMessage += `
-moisture sensor polarity: ${
-					getEnumMemberName(
-						IrrigationSensorPolarity,
-						systemConfig.moistureSensorPolarity,
-					)
-				}`;
-			}
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
-				message: logMessage,
+				message: logText(
+					"received irrigation system configuration:",
+					{
+						nested: logDict({
+							"master valve delay":
+								`${systemConfig.masterValveDelay} seconds`,
+							"high pressure threshold":
+								`${systemConfig.highPressureThreshold} kPa`,
+							"low pressure threshold":
+								`${systemConfig.lowPressureThreshold} kPa`,
+							"rain sensor polarity":
+								systemConfig.rainSensorPolarity != undefined
+									? getEnumMemberName(
+										IrrigationSensorPolarity,
+										systemConfig.rainSensorPolarity,
+									)
+									: undefined,
+							"moisture sensor polarity":
+								systemConfig.moistureSensorPolarity != undefined
+									? getEnumMemberName(
+										IrrigationSensorPolarity,
+										systemConfig.moistureSensorPolarity,
+									)
+									: undefined,
+						}),
+					},
+				),
 				direction: "inbound",
 			});
 		}
@@ -1257,11 +1272,8 @@ moisture sensor polarity: ${
 			await api.getValveInfo("master");
 		}
 
-		for (
-			let i = 1;
-			i <= (IrrigationCC.getNumValvesCached(ctx, endpoint) ?? 0);
-			i++
-		) {
+		const numValves = IrrigationCC.getNumValvesCached(ctx, endpoint) ?? 0;
+		for (let i = 1; i <= numValves; i++) {
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
 				message: `Querying configuration for valve ${
@@ -1285,6 +1297,8 @@ moisture sensor polarity: ${
 				direction: "outbound",
 			});
 			await api.getValveInfo(i);
+
+			options?.onProgress?.(i, numValves);
 		}
 	}
 
@@ -1569,9 +1583,9 @@ export class IrrigationCCSystemStatusReport extends IrrigationCC {
 			this.errorValve
 				? "a valve or the master valve has an error"
 				: undefined,
-		].filter(Boolean);
+		].filter((e) => e != undefined);
 		if (errors.length > 0) {
-			message.errors = errors.map((e) => `\n· ${e}`).join("");
+			message.errors = logList(errors);
 		}
 
 		return {
@@ -1963,9 +1977,9 @@ export class IrrigationCCValveInfoReport extends IrrigationCC {
 			this.errorMaximumFlow ? "maximum flow" : undefined,
 			this.errorHighFlow ? "flow above high threshold" : undefined,
 			this.errorLowFlow ? "flow below low threshold" : undefined,
-		].filter(Boolean);
+		].filter((e) => e != undefined);
 		if (errors.length > 0) {
-			message.errors = errors.map((e) => `\n· ${e}`).join("");
+			message.errors = logList(errors);
 		}
 		return {
 			...super.toLogEntry(ctx),

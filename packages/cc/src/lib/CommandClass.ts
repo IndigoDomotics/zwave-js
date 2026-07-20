@@ -17,6 +17,8 @@ import {
 	type HostIDs,
 	type ListenBehavior,
 	type LogNode,
+	type LogPayload,
+	type LogPayloadText,
 	type MessageOrCCLogEntry,
 	type MessagePriority,
 	type MessageRecord,
@@ -38,7 +40,10 @@ import {
 	ZWaveErrorCodes,
 	getCCName,
 	isZWaveError,
+	logBuffer,
+	logText,
 	parseCCId,
+	toLogPayload,
 	valueIdToString,
 } from "@zwave-js/core";
 import {
@@ -75,7 +80,7 @@ import {
 	defaultCCValueOptions,
 } from "./Values.js";
 import type { CCEncodingContext, CCParsingContext } from "./traits.js";
-import type { GetInterviewOptions } from "./traits.js";
+import type { GetInterviewOptions, ReportInterviewProgress } from "./traits.js";
 
 export interface CommandClassOptions extends CCAddress {
 	ccId?: number; // Used to overwrite the declared CC ID
@@ -112,6 +117,7 @@ export type InterviewContext =
 		& ControlsCC
 		& QuerySecurityClasses
 		& SetSecurityClass
+		& ReportInterviewProgress
 		& GetEndpoint<EndpointId & GetCCs & SupportsCC & ControlsCC & ModifyCCs>
 		& GetAllEndpoints<EndpointId & SupportsCC & ControlsCC>
 	>
@@ -125,6 +131,12 @@ export type RefreshValuesContext = CCAPIHost<
 export interface RefreshValuesOptions {
 	/** The priority to use for the refresh value queries */
 	priority?: MessagePriority;
+	/** An optional tag to identify the transactions created by the refresh value queries */
+	tag?: any;
+	/**
+	 * An optional callback to report fine-grained progress while refreshing values.
+	 */
+	onProgress?: (completed: number, total: number) => void;
 }
 
 export type PersistValuesContext =
@@ -418,9 +430,7 @@ export class CommandClass implements CCId {
 				message.command = num2hex(this.ccCommand);
 			}
 		}
-		if (this.payload.length > 0) {
-			message.payload = buffer2hex(this.payload);
-		}
+		message.payload = logBuffer(this.payload);
 		return {
 			tags: [tag],
 			message,
@@ -953,14 +963,19 @@ export class CommandClass implements CCId {
 	}
 
 	/**
-	 * When a CC supports to be split into multiple partial CCs, this indicates that the last report hasn't been received yet.
-	 * @param _session The previously received set of messages received in this partial CC session
+	 * When a CC supports to be split into multiple partial CCs, this returns how many
+	 * more segments are expected after this one (e.g. the value of a "reports to follow" field).
+	 * The counter doubles as the segment's position within the session, which is used
+	 * to detect missing, duplicated and reordered segments.
 	 */
-	public expectMoreMessages(_session: CommandClass[]): boolean {
-		return false; // By default, all CCs are monolithic
+	public getRemainingSegments(): number | undefined {
+		return undefined; // By default, all CCs are monolithic
 	}
 
-	/** Include previously received partial responses into a final CC */
+	/**
+	 * Include previously received partial responses into a final CC.
+	 * The partials are deduplicated and ordered like they were transmitted by the node.
+	 */
 	public async mergePartialCCs(
 		_partials: CommandClass[],
 		_ctx: CCParsingContext,
@@ -1187,6 +1202,38 @@ export class InvalidCC extends CommandClass {
 				: undefined,
 		};
 	}
+}
+
+/** Renders a CC and its encapsulated CC(s) into a tree-shaped log payload */
+export function ccToLogPayload(
+	cc: CommandClass,
+	ctx?: GetValueDB,
+): LogPayloadText {
+	const entry = cc.toLogEntry(ctx);
+	const nested: LogPayload[] = [];
+	if (entry.message) {
+		const message = toLogPayload(entry.message);
+		// Hoist tagged payloads nested inside the message dict (e.g. S2 extensions)
+		// into the CC's children, so they render as tree siblings
+		if (message.type === "dict" && message.nested) {
+			nested.push({ ...message, nested: undefined });
+			nested.push(
+				...(isArray(message.nested)
+					? message.nested
+					: [message.nested]),
+			);
+		} else {
+			nested.push(message);
+		}
+	}
+	if (isEncapsulatingCommandClass(cc)) {
+		nested.push(ccToLogPayload(cc.encapsulated, ctx));
+	} else if (isMultiEncapsulatingCommandClass(cc)) {
+		for (const encap of cc.encapsulated) {
+			nested.push(ccToLogPayload(encap, ctx));
+		}
+	}
+	return logText([], { tags: entry.tags, nested });
 }
 
 export type CCConstructor<T extends CommandClass> = typeof CommandClass & {

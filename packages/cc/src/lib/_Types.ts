@@ -1535,7 +1535,7 @@ export enum ThermostatSetpointType {
 	"Away Heating" = 0x0d, // CC v2
 	"Away Cooling" = 0x0e, // CC v3
 	"Full Power" = 0x0f, // CC v3
-	// Update the interview procecure when adding new types
+	// Update the interview procedure when adding new types
 }
 
 export interface ThermostatSetpointValue {
@@ -1713,6 +1713,17 @@ export enum UserCredentialCredentialReportType {
 	ManufacturerSecurityRules = 0x08,
 	WrongUserUniqueIdentifier = 0x09,
 	DuplicateAdminPINCode = 0x0a,
+}
+
+export enum UserCredentialLearnStatus {
+	Started = 0x00,
+	Success = 0x01,
+	AlreadyInProgress = 0x02,
+	EndedNotDueToTimeout = 0x03,
+	Timeout = 0x04,
+	StepRetry = 0x05,
+	InvalidAddOperationType = 0xfe,
+	InvalidModifyOperationType = 0xff,
 }
 
 export enum UserCredentialModifierType {

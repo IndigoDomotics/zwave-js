@@ -10,10 +10,12 @@ import {
 	ValueMetadata,
 	type WithAddress,
 	encodeBitMask,
+	logList,
+	logText,
 	parseBitMask,
 	validatePayload,
 } from "@zwave-js/core";
-import { Bytes, getEnumMemberName, pick } from "@zwave-js/shared";
+import { Bytes, getEnumMemberName, isEnumMember, pick } from "@zwave-js/shared";
 import { validateArgs } from "@zwave-js/transformers";
 import {
 	CCAPI,
@@ -468,7 +470,7 @@ export class WindowCoveringCCAPI extends CCAPI {
 	): Promise<SupervisionResult | undefined> {
 		this.assertSupportsCommand(
 			WindowCoveringCommand,
-			WindowCoveringCommand.StartLevelChange,
+			WindowCoveringCommand.Set,
 		);
 
 		const cc = new WindowCoveringCCSet({
@@ -539,6 +541,7 @@ export class WindowCoveringCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -554,14 +557,16 @@ export class WindowCoveringCC extends CommandClass {
 		});
 		const supported = await api.getSupported();
 		if (supported?.length) {
-			const logMessage = `supported window covering parameters:
-${
-				supported
-					.map((p) =>
-						`· ${getEnumMemberName(WindowCoveringParameter, p)}`
-					)
-					.join("\n")
-			}`;
+			const logMessage = logText(
+				"supported window covering parameters:",
+				{
+					nested: logList(
+						supported.map((p) =>
+							getEnumMemberName(WindowCoveringParameter, p)
+						),
+					),
+				},
+			);
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
 				message: logMessage,
@@ -596,7 +601,11 @@ ${
 			}
 
 			// Query current values for all supported parameters
-			await this.refreshValues(ctx);
+			await this.refreshValues(ctx, {
+				tag: "interview",
+				onProgress: (completed, total) =>
+					node.reportInterviewProgress(completed, total),
+			});
 		}
 
 		// Remember that the interview is complete
@@ -615,6 +624,7 @@ ${
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		const parameters: number[] = this.getValue(
@@ -622,10 +632,12 @@ ${
 			WindowCoveringCCValues.supportedParameters,
 		) ?? [];
 
-		for (const param of parameters) {
-			// Only query odd parameters (with position support)
-			if (param % 2 == 0) continue;
+		// Only odd parameters have position support and need to be queried
+		const queryableParameters = parameters.filter((param) =>
+			param % 2 != 0
+		);
 
+		for (const [i, param] of queryableParameters.entries()) {
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
 				message: `querying position for parameter ${
@@ -637,6 +649,8 @@ ${
 				direction: "outbound",
 			});
 			await api.get(param);
+
+			options?.onProgress?.(i + 1, queryableParameters.length);
 		}
 	}
 
@@ -712,17 +726,14 @@ export class WindowCoveringCCSupportedReport extends WindowCoveringCC {
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported parameters": this.supportedParameters
-					.map(
-						(p) =>
-							`\n· ${
-								getEnumMemberName(
-									WindowCoveringParameter,
-									p,
-								)
-							}`,
-					)
-					.join(""),
+				"supported parameters": logList(
+					this.supportedParameters.map((p) =>
+						getEnumMemberName(
+							WindowCoveringParameter,
+							p,
+						)
+					),
+				),
 			},
 		};
 	}
@@ -775,6 +786,11 @@ export class WindowCoveringCCReport extends WindowCoveringCC {
 	): WindowCoveringCCReport {
 		validatePayload(raw.payload.length >= 4);
 		const parameter: WindowCoveringParameter = raw.payload[0];
+		validatePayload(isEnumMember(WindowCoveringParameter, parameter));
+		validatePayload(
+			raw.payload[1] <= 99,
+			raw.payload[2] <= 99,
+		);
 		const currentValue = raw.payload[1];
 		const targetValue = raw.payload[2];
 		const duration = Duration.parseReport(raw.payload[3])

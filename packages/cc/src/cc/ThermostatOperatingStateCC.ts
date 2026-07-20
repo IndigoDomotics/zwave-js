@@ -9,6 +9,7 @@ import {
 	type WithAddress,
 	encodeBitMask,
 	enumValuesToMetadataStates,
+	logList,
 	parseBitMask,
 	validatePayload,
 } from "@zwave-js/core";
@@ -179,7 +180,7 @@ export class ThermostatOperatingStateCC extends CommandClass {
 			direction: "none",
 		});
 
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, { tag: "interview" });
 
 		this.setInterviewComplete(ctx, true);
 	}
@@ -196,6 +197,7 @@ export class ThermostatOperatingStateCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		ctx.logNode(node.id, {
@@ -331,11 +333,11 @@ export class ThermostatOperatingStateCCLoggingSupportedReport
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported logging types": this.supportedLoggingTypes
-					.map((t) =>
-						`\n· ${getEnumMemberName(ThermostatOperatingState, t)}`
-					)
-					.join(""),
+				"supported logging types": logList(
+					this.supportedLoggingTypes.map((t) =>
+						getEnumMemberName(ThermostatOperatingState, t)
+					),
+				),
 			},
 		};
 	}
@@ -410,8 +412,8 @@ export class ThermostatOperatingStateCCLoggingReport
 		return {};
 	}
 
-	public expectMoreMessages(): boolean {
-		return this.reportsToFollow > 0;
+	public getRemainingSegments(): number | undefined {
+		return this.reportsToFollow;
 	}
 
 	public mergePartialCCs(

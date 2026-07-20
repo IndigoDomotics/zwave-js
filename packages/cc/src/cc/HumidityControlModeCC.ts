@@ -10,6 +10,8 @@ import {
 	ZWaveError,
 	ZWaveErrorCodes,
 	enumValuesToMetadataStates,
+	logList,
+	logText,
 	parseBitMask,
 	supervisedCommandSucceeded,
 	validatePayload,
@@ -199,6 +201,7 @@ export class HumidityControlModeCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -216,19 +219,18 @@ export class HumidityControlModeCC extends CommandClass {
 
 		const supportedModes = await api.getSupportedModes();
 		if (supportedModes) {
-			const logMessage = `received supported humidity control modes:${
-				supportedModes
-					.map(
-						(mode) =>
-							`\n· ${
-								getEnumMemberName(HumidityControlMode, mode)
-							}`,
-					)
-					.join("")
-			}`;
 			ctx.logNode(node.id, {
 				endpoint: this.endpointIndex,
-				message: logMessage,
+				message: logText(
+					"received supported humidity control modes:",
+					{
+						nested: logList(
+							supportedModes.map((mode) =>
+								getEnumMemberName(HumidityControlMode, mode)
+							),
+						),
+					},
+				),
 				direction: "inbound",
 			});
 		} else {
@@ -241,7 +243,7 @@ export class HumidityControlModeCC extends CommandClass {
 			return;
 		}
 
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, { tag: "interview" });
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -259,6 +261,7 @@ export class HumidityControlModeCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		// Query the current status
@@ -432,17 +435,11 @@ export class HumidityControlModeCCSupportedReport
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported modes": this.supportedModes
-					.map(
-						(mode) =>
-							`\n· ${
-								getEnumMemberName(
-									HumidityControlMode,
-									mode,
-								)
-							}`,
-					)
-					.join(""),
+				"supported modes": logList(
+					this.supportedModes.map((mode) =>
+						getEnumMemberName(HumidityControlMode, mode)
+					),
+				),
 			},
 		};
 	}

@@ -15,6 +15,8 @@ import {
 	ZWaveErrorCodes,
 	encodeBitMask,
 	isUnsupervisedOrSucceeded,
+	logList,
+	logText,
 	parseBitMask,
 	supervisedCommandSucceeded,
 	validatePayload,
@@ -549,6 +551,7 @@ export class ColorSwitchCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -575,11 +578,13 @@ export class ColorSwitchCC extends CommandClass {
 
 		ctx.logNode(node.id, {
 			endpoint: this.endpointIndex,
-			message: `received supported colors:${
-				supportedColors
-					.map((c) => `\n· ${getEnumMemberName(ColorComponent, c)}`)
-					.join("")
-			}`,
+			message: logText("received supported colors:", {
+				nested: logList(
+					supportedColors.map((c) =>
+						getEnumMemberName(ColorComponent, c)
+					),
+				),
+			}),
 			direction: "outbound",
 		});
 
@@ -616,7 +621,11 @@ export class ColorSwitchCC extends CommandClass {
 		}
 
 		// Query all color components
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, {
+			tag: "interview",
+			onProgress: (completed, total) =>
+				node.reportInterviewProgress(completed, total),
+		});
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -634,6 +643,7 @@ export class ColorSwitchCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		const supportedColors: readonly ColorComponent[] = this.getValue(
@@ -641,7 +651,7 @@ export class ColorSwitchCC extends CommandClass {
 			ColorSwitchCCValues.supportedColorComponents,
 		) ?? [];
 
-		for (const color of supportedColors) {
+		for (const [i, color] of supportedColors.entries()) {
 			// Some devices report invalid colors, but the CC API checks
 			// for valid values and throws otherwise.
 			if (!isEnumMember(ColorComponent, color)) continue;
@@ -653,6 +663,8 @@ export class ColorSwitchCC extends CommandClass {
 				direction: "outbound",
 			});
 			await api.get(color);
+
+			options?.onProgress?.(i + 1, supportedColors.length);
 		}
 	}
 
@@ -723,9 +735,11 @@ export class ColorSwitchCCSupportedReport extends ColorSwitchCC {
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported color components": this.supportedColorComponents
-					.map((c) => `\n· ${getEnumMemberName(ColorComponent, c)}`)
-					.join(""),
+				"supported color components": logList(
+					this.supportedColorComponents.map((c) =>
+						getEnumMemberName(ColorComponent, c)
+					),
+				),
 			},
 		};
 	}
@@ -770,6 +784,7 @@ export class ColorSwitchCCReport extends ColorSwitchCC {
 	public static from(raw: CCRaw, ctx: CCParsingContext): ColorSwitchCCReport {
 		validatePayload(raw.payload.length >= 2);
 		const colorComponent: ColorComponent = raw.payload[0];
+		validatePayload(isEnumMember(ColorComponent, colorComponent));
 		const currentValue = raw.payload[1];
 		let targetValue: number | undefined;
 		let duration: Duration | undefined;

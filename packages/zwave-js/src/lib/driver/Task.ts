@@ -40,6 +40,29 @@ export type TaskTag =
 		// Replace a failed node
 		id: "replace-failed-node";
 		nodeId: number;
+	}
+	| {
+		// Interview a node
+		id: "interview";
+		nodeId: number;
+	}
+	| {
+		// Refresh CC values of a node
+		id: "refresh-values";
+		nodeId: number;
+		mode: "user" | "auto";
+	}
+	| {
+		// Update the controller's firmware
+		id: "firmware-update-otw";
+	}
+	| {
+		// Back up the controller's NVM
+		id: "nvm-backup";
+	}
+	| {
+		// Restore a backup to the controller's NVM
+		id: "nvm-restore";
 	};
 
 export type Task<T> = WaddleTask<T, TaskTag, ZWaveError>;

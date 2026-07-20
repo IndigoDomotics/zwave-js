@@ -49,6 +49,8 @@ test/.*-audit.json
 test/*_logrotate.json
 test/zwavejs_*.log
 .DS_Store
+.docs-index/
+.docs-feedback/
 
 # Ignore PyCharm/Intellij stuff
 .idea

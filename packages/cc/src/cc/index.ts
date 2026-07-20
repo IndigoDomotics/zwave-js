@@ -69,6 +69,7 @@ export {
 	AssociationCCValues,
 };
 export type {
+	AssociationGroupInfo,
 	AssociationGroupInfoCCCommandListGetOptions,
 	AssociationGroupInfoCCCommandListReportOptions,
 	AssociationGroupInfoCCInfoGetOptions,
@@ -779,11 +780,13 @@ export {
 	MultiChannelAssociationCCValues,
 };
 export type {
+	EndpointCapability,
 	MultiChannelCCAggregatedMembersGetOptions,
 	MultiChannelCCAggregatedMembersReportOptions,
 	MultiChannelCCCapabilityGetOptions,
 	MultiChannelCCCapabilityReportOptions,
 	MultiChannelCCCommandEncapsulationOptions,
+	MultiChannelCCDestination,
 	MultiChannelCCEndPointFindOptions,
 	MultiChannelCCEndPointFindReportOptions,
 	MultiChannelCCEndPointReportOptions,
@@ -1444,6 +1447,7 @@ export {
 	isTransportServiceEncapsulation,
 };
 export type {
+	UserCode,
 	UserCodeCCAdminCodeReportOptions,
 	UserCodeCCAdminCodeSetOptions,
 	UserCodeCCCapabilitiesReportOptions,
@@ -1506,6 +1510,8 @@ export type {
 	UserCredentialCCAdminPinCodeReportOptions,
 	UserCredentialCCAdminPinCodeSetOptions,
 	UserCredentialCCAllUsersChecksumReportOptions,
+	UserCredentialCCAssociationReportOptions,
+	UserCredentialCCAssociationSetOptions,
 	UserCredentialCCCredentialCapabilitiesReportOptions,
 	UserCredentialCCCredentialChecksumGetOptions,
 	UserCredentialCCCredentialChecksumReportOptions,
@@ -1521,8 +1527,6 @@ export type {
 	UserCredentialCCUserCapabilitiesReportOptions,
 	UserCredentialCCUserChecksumGetOptions,
 	UserCredentialCCUserChecksumReportOptions,
-	UserCredentialCCUserCredentialAssociationReportOptions,
-	UserCredentialCCUserCredentialAssociationSetOptions,
 	UserCredentialCCUserGetOptions,
 	UserCredentialCCUserReportOptions,
 	UserCredentialCCUserSetOptions,
@@ -1534,6 +1538,8 @@ import {
 	UserCredentialCCAdminPinCodeSet,
 	UserCredentialCCAllUsersChecksumGet,
 	UserCredentialCCAllUsersChecksumReport,
+	UserCredentialCCAssociationReport,
+	UserCredentialCCAssociationSet,
 	UserCredentialCCCredentialCapabilitiesGet,
 	UserCredentialCCCredentialCapabilitiesReport,
 	UserCredentialCCCredentialChecksumGet,
@@ -1553,8 +1559,6 @@ import {
 	UserCredentialCCUserCapabilitiesReport,
 	UserCredentialCCUserChecksumGet,
 	UserCredentialCCUserChecksumReport,
-	UserCredentialCCUserCredentialAssociationReport,
-	UserCredentialCCUserCredentialAssociationSet,
 	UserCredentialCCUserGet,
 	UserCredentialCCUserReport,
 	UserCredentialCCUserSet,
@@ -1567,6 +1571,8 @@ export {
 	UserCredentialCCAdminPinCodeSet,
 	UserCredentialCCAllUsersChecksumGet,
 	UserCredentialCCAllUsersChecksumReport,
+	UserCredentialCCAssociationReport,
+	UserCredentialCCAssociationSet,
 	UserCredentialCCCredentialCapabilitiesGet,
 	UserCredentialCCCredentialCapabilitiesReport,
 	UserCredentialCCCredentialChecksumGet,
@@ -1586,8 +1592,6 @@ export {
 	UserCredentialCCUserCapabilitiesReport,
 	UserCredentialCCUserChecksumGet,
 	UserCredentialCCUserChecksumReport,
-	UserCredentialCCUserCredentialAssociationReport,
-	UserCredentialCCUserCredentialAssociationSet,
 	UserCredentialCCUserGet,
 	UserCredentialCCUserReport,
 	UserCredentialCCUserSet,
@@ -2254,10 +2258,10 @@ export function registerCCs(): void {
 	void ThermostatOperatingStateCC;
 	void ThermostatOperatingStateCCReport;
 	void ThermostatOperatingStateCCGet;
-	void ThermostatOperatingStateCCLoggingSupportedGet;
 	void ThermostatOperatingStateCCLoggingSupportedReport;
-	void ThermostatOperatingStateCCLoggingGet;
+	void ThermostatOperatingStateCCLoggingSupportedGet;
 	void ThermostatOperatingStateCCLoggingReport;
+	void ThermostatOperatingStateCCLoggingGet;
 	void ThermostatSetbackCC;
 	void ThermostatSetbackCCSet;
 	void ThermostatSetbackCCReport;
@@ -2329,8 +2333,8 @@ export function registerCCs(): void {
 	void UserCredentialCCCredentialLearnStart;
 	void UserCredentialCCCredentialLearnCancel;
 	void UserCredentialCCCredentialLearnReport;
-	void UserCredentialCCUserCredentialAssociationSet;
-	void UserCredentialCCUserCredentialAssociationReport;
+	void UserCredentialCCAssociationReport;
+	void UserCredentialCCAssociationSet;
 	void UserCredentialCCAllUsersChecksumReport;
 	void UserCredentialCCAllUsersChecksumGet;
 	void UserCredentialCCUserChecksumReport;

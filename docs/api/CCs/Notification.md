@@ -8,7 +8,16 @@
 
 ```ts
 async getInternal(
-	options: NotificationCCGetOptions,
+	options: {
+		alarmType: number;
+	},
+): Promise<NotificationCCReport | undefined>;
+
+async getInternal(
+	options: {
+		notificationType: number;
+		notificationEvent?: number;
+	},
 ): Promise<NotificationCCReport | undefined>;
 ```
 
@@ -18,14 +27,53 @@ async getInternal(
 
 ```ts
 async sendReport(
-	options: NotificationCCReportOptions,
+	options: {
+		alarmType?: number;
+		alarmLevel?: number;
+		notificationType?: number;
+		notificationEvent?: number;
+		notificationStatus?: number;
+		eventParameters?: BytesView;
+		sequenceNumber?: number;
+	},
 ): Promise<SupervisionResult | undefined>;
 ```
 
 ### `get`
 
 ```ts
-async get(options: NotificationCCGetOptions): Promise<Pick<NotificationCCReport, "notificationStatus" | "notificationEvent" | "alarmLevel" | "eventParameters" | "sequenceNumber"> | undefined>;
+async get(options: {
+	alarmType: number;
+}): Promise<
+	{
+		alarmLevel?: number;
+		eventParameters?:
+			| number
+			| BytesView
+			| Duration
+			| Record<string, number>;
+		notificationEvent?: number;
+		notificationStatus?: number | boolean;
+		sequenceNumber?: number;
+	} | undefined
+>;
+
+async get(options: {
+	notificationType: number;
+	notificationEvent?: number;
+}): Promise<
+	{
+		alarmLevel?: number;
+		eventParameters?:
+			| number
+			| BytesView
+			| Duration
+			| Record<string, number>;
+		notificationEvent?: number;
+		notificationStatus?: number | boolean;
+		sequenceNumber?: number;
+	} | undefined
+>;
 ```
 
 ### `set`
@@ -40,7 +88,12 @@ async set(
 ### `getSupported`
 
 ```ts
-async getSupported(): Promise<Pick<NotificationCCSupportedReport, "supportsV1Alarm" | "supportedNotificationTypes"> | undefined>;
+async getSupported(): Promise<
+	{
+		supportedNotificationTypes: number[];
+		supportsV1Alarm: boolean;
+	} | undefined
+>;
 ```
 
 ### `getSupportedEvents`
@@ -93,7 +146,7 @@ async getSupportedEvents(
 - **min. value:** 0
 - **max. value:** 255
 
-### `doorStateSimple`
+### `deprecated_doorStateSimple`
 
 ```ts
 {
@@ -114,7 +167,7 @@ async getSupportedEvents(
 - **min. value:** 0
 - **max. value:** 255
 
-### `doorTiltState`
+### `deprecated_doorTiltState`
 
 ```ts
 {
@@ -152,6 +205,27 @@ async getSupportedEvents(
 - **stateful:** true
 - **secret:** false
 - **value type:** `"any"`
+
+### `openingState`
+
+```ts
+{
+	commandClass: CommandClasses.Notification,
+	endpoint: number,
+	property: "Access Control",
+	propertyKey: "Opening state",
+}
+```
+
+- **label:** Opening state
+- **min. CC version:** 1
+- **readable:** true
+- **writeable:** false
+- **stateful:** true
+- **secret:** false
+- **value type:** `"number"`
+- **min. value:** 0
+- **max. value:** 255
 
 ### `unknownNotificationType(notificationType: number)`
 
@@ -193,3 +267,19 @@ async getSupportedEvents(
 - **value type:** `"number"`
 - **min. value:** 0
 - **max. value:** 255
+
+## Related types
+
+### `NotificationCCReport`
+
+```ts
+interface NotificationCCReport {
+	alarmType: number | undefined;
+	alarmLevel: number | undefined;
+	notificationType: number | undefined;
+	notificationStatus: number | boolean | undefined;
+	notificationEvent: number | undefined;
+	eventParameters: any;
+	sequenceNumber: number | undefined;
+}
+```

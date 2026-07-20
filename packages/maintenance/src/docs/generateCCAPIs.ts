@@ -12,21 +12,14 @@ import { fileURLToPath } from "node:url";
 import { isMainThread } from "node:worker_threads";
 import { Piscina } from "piscina";
 import {
-	type CommentRange,
-	type ExportedDeclarations,
-	type InterfaceDeclaration,
-	type InterfaceDeclarationStructure,
 	type JSDocTagStructure,
 	type MethodDeclaration,
-	Node,
 	type OptionalKind,
 	Project,
-	type PropertySignatureStructure,
 	type SourceFile,
 	SyntaxKind,
 	type Type,
 	TypeFormatFlags,
-	type TypeLiteralNode,
 	type ts,
 } from "ts-morph";
 import { formatWithDprint } from "../dprint.js";
@@ -35,216 +28,28 @@ import {
 	projectRoot,
 	tsConfigFilePathForDocs as tsConfigFilePath,
 } from "../tsAPITools.js";
+import {
+	type EmbeddedType,
+	collectTypeNamesFromText,
+	createTypeRenderContext,
+	docsifyRoute,
+	docsifySlugify,
+	ensureReturnTypeNode,
+	fixTypePrinterErrors,
+	formatTransformedSignature,
+	getJsDocDescription,
+	renderEmbeddedTypesSection,
+	resolveDeclByName,
+	transformSignature,
+	tryDistributeCompoundParameter,
+	typeRegistry,
+} from "./renderTypes.js";
 
 // Support directly loading this file in a worker
 import { register } from "tsx/esm/api";
 register();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-const exportDeclarationCache = new Map<
-	string,
-	ReadonlyMap<string, ExportedDeclarations[]>
->();
-
-export function findSourceNode(
-	program: Project,
-	exportingFile: string,
-	identifier: string,
-): ExportedDeclarations | undefined {
-	// Scan all source files
-	if (!exportDeclarationCache.has(exportingFile)) {
-		const decls = program.getSourceFile(exportingFile)
-			?.getExportedDeclarations();
-		if (decls) exportDeclarationCache.set(exportingFile, decls);
-	}
-	return exportDeclarationCache.get(exportingFile)
-		?.get(identifier)?.[0];
-}
-
-export function stripComments(
-	node: ExportedDeclarations,
-	options: ImportRange["options"],
-): ExportedDeclarations {
-	if (Node.isTextInsertable(node)) {
-		// Remove some comments if desired
-		const ranges: { pos: number; end: number }[] = [];
-		const removePredicate = (c: CommentRange) =>
-			(!options.comments
-				&& c.getKind() === SyntaxKind.SingleLineCommentTrivia)
-			|| (!options.jsdoc
-				&& c.getKind() === SyntaxKind.MultiLineCommentTrivia);
-
-		const getCommentRangesForNode = (
-			node: Node,
-		): { pos: number; end: number }[] => {
-			const comments = node.getLeadingCommentRanges();
-			const ret = comments.map((c, i) => ({
-				pos: c.getPos(),
-				end: i < comments.length - 1
-					? comments[i + 1].getPos()
-					: Math.max(node.getStart(), c.getEnd()),
-				remove: removePredicate(c),
-			}));
-			// Only use comment ranges that should be removed
-			return ret.filter((r) => r.remove);
-		};
-
-		if (Node.isEnumDeclaration(node)) {
-			for (const member of node.getMembers()) {
-				ranges.push(...getCommentRangesForNode(member));
-			}
-		} else if (Node.isInterfaceDeclaration(node)) {
-			const walkInterfaceDeclaration = (node: InterfaceDeclaration) => {
-				for (const member of node.getMembers()) {
-					ranges.push(...getCommentRangesForNode(member));
-					if (Node.isInterfaceDeclaration(member)) {
-						walkInterfaceDeclaration(member);
-					}
-				}
-			};
-			walkInterfaceDeclaration(node);
-		}
-
-		// Sort in reverse order, so the removals don't influence each other
-		ranges.sort((a, b) => b.pos - a.pos);
-		for (const { pos, end } of ranges) {
-			node.removeText(pos, end);
-		}
-	}
-	return node;
-}
-
-function shouldStripPropertySignature(
-	p: OptionalKind<PropertySignatureStructure>,
-): boolean {
-	return !!p.docs?.some(
-		(d) =>
-			typeof d !== "string"
-			&& d.tags?.some((t) => /(deprecated|internal)/.test(t.tagName)),
-	);
-}
-
-// As long as ts-morph has no means to print a structure, we'll have to use this
-// to print the declarations of a class
-function printInterfaceDeclarationStructure(
-	struct: InterfaceDeclarationStructure,
-): string {
-	return `
-interface ${struct.name}${
-		struct.typeParameters?.length
-			// oxlint-disable-next-line typescript/no-base-to-string
-			? `<${struct.typeParameters.map((t) => t.toString()).join(", ")}>`
-			: ""
-	} {
-	${
-		struct.properties
-			?.filter((p) => !shouldStripPropertySignature(p))
-			.map((p) => {
-				return `${p.isReadonly ? "readonly " : ""}${p.name}${
-					p.hasQuestionToken ? "?:" : ":"
-				} ${p.type as string};`;
-			})
-			.join("\n")
-	}
-}`;
-}
-
-export function getTransformedSource(
-	node: ExportedDeclarations,
-	options: ImportRange["options"],
-): string {
-	// Create a temporary project with a temporary source file to print the node
-	const project = new Project();
-	const sourceFile = project.createSourceFile("index.ts", node.getText());
-	node = [
-		...sourceFile.getExportedDeclarations().values(),
-	][0][0];
-
-	// Remove @internal and @deprecated members
-	if (Node.isInterfaceDeclaration(node)) {
-		const commentsToRemove: { remove(): void }[] = [];
-		const walkDeclaration = (
-			node: InterfaceDeclaration | TypeLiteralNode,
-		) => {
-			for (const member of node.getMembers()) {
-				if (
-					member
-						.getJsDocs()
-						.some((doc) =>
-							/@(deprecated|internal)/.test(doc.getInnerText())
-						)
-				) {
-					commentsToRemove.push(member);
-				}
-				if (Node.isInterfaceDeclaration(member)) {
-					walkDeclaration(member);
-				} else if (Node.isPropertySignature(member)) {
-					const typeNode = member.getTypeNode();
-					if (Node.isTypeLiteral(typeNode)) {
-						walkDeclaration(typeNode);
-					}
-				}
-			}
-		};
-		walkDeclaration(node);
-		for (let i = commentsToRemove.length - 1; i >= 0; i--) {
-			commentsToRemove[i].remove();
-		}
-	}
-
-	// Remove exports and declare keywords
-	if (Node.isModifierable(node)) {
-		node = node.toggleModifier("declare", false);
-		// @ts-expect-error
-		node = node.toggleModifier("export", false);
-	}
-
-	let ret: string;
-	if (Node.isClassDeclaration(node)) {
-		// Class declarations contain the entire source, we are only interested in the properties
-		ret = printInterfaceDeclarationStructure(node.extractInterface());
-	} else {
-		// Comments must be removed last (if that is desired)
-		node = stripComments(node, options);
-		// Using getText instead of print avoids reformatting the node
-		ret = node.getText();
-	}
-
-	// Format so we get the original formatting back
-	ret = formatWithDprint("index.ts", ret).trim();
-	return ret;
-}
-
-interface ImportRange {
-	index: number;
-	end: number;
-	module: string;
-	symbol: string;
-	import: string;
-	options: {
-		comments?: boolean;
-		jsdoc?: boolean;
-	};
-}
-
-const importRegex =
-	/(?<import><!-- #import (?<symbol>.*?) from "(?<module>.*?)"(?: with (?<options>[\w\-, ]*?))? -->)(?:[\s\r\n]*(^`{3,4})ts[\r\n]*(?<source>(.|\n)*?)\5)?/gm;
-
-export function findImportRanges(docFile: string): ImportRange[] {
-	const matches = [...docFile.matchAll(importRegex)];
-	return matches.map((match) => ({
-		index: match.index,
-		end: match.index + match[0].length,
-		module: match.groups!.module,
-		symbol: match.groups!.symbol,
-		import: match.groups!.import,
-		options: {
-			comments: !!match.groups!.options?.includes("comments"),
-			jsdoc: !match.groups!.options?.includes("no-jsdoc"),
-		},
-	}));
-}
 
 function stripQuotes(str: string): string {
 	return str.replaceAll(/^['"]|['"]$/g, "");
@@ -276,33 +81,23 @@ Context: ${context}`,
 
 const docsDir = path.join(projectRoot, "docs");
 const ccDocsDir = path.join(docsDir, "api/CCs");
+const formattedValueTypeCache = new Map<string, string>();
 
 function fixPrinterErrors(text: string): string {
-	return (
-		text
-			// The text includes one too many tabs at the start of each line
-			.replaceAll(/^\t(\t*)/gm, "$1")
-			// TS 4.2+ has some weird printing bug for aliases: https://github.com/microsoft/TypeScript/issues/43031
-			.replaceAll(
-				/(\w+) \| \("unknown" & { __brand: \1; }\)/g,
-				"Maybe<$1>",
-			)
-	);
+	// The text includes one too many tabs at the start of each line
+	return fixTypePrinterErrors(text.replaceAll(/^\t(\t*)/gm, "$1"));
 }
 
 function printMethodDeclaration(method: MethodDeclaration): string {
+	ensureReturnTypeNode(method);
 	method = method.toggleModifier("public", false);
 	method.getDecorators().forEach((d) => d.remove());
 	const start = method.getStart();
 	const end = method.getBody()!.getStart();
-	let ret = method
+	const ret = method
 		.getText()
 		.slice(0, end - start)
-		.trim();
-	if (!method.getReturnTypeNode()) {
-		ret += ": " + method.getSignature().getReturnType().getText(method);
-	}
-	ret += ";";
+		.trim() + ";";
 	return fixPrinterErrors(ret);
 }
 
@@ -311,10 +106,20 @@ function printOverload(method: MethodDeclaration): string {
 	return fixPrinterErrors(method.getText());
 }
 
+export interface CCDocFileResult {
+	generatedIndex: string;
+	generatedSidebar: any;
+	pageRoute: string;
+	embeds: EmbeddedType[];
+	/** Names of all documentable types referenced on the page */
+	referenced: string[];
+	unresolved: Record<string, string>;
+}
+
 async function processCCDocFile(
 	file: SourceFile,
-	dtsFile: SourceFile,
-): Promise<{ generatedIndex: string; generatedSidebar: any } | undefined> {
+	linkTargets: ReadonlyMap<string, string>,
+): Promise<CCDocFileResult | undefined> {
 	const APIClass = file
 		.getClasses()
 		.find((c) => c.getName()?.endsWith("CCAPI"));
@@ -340,6 +145,13 @@ async function processCCDocFile(
 	}\``;
 	const generatedSidebar = `\n\t- [${ccName} CC](api/CCs/${filename})`;
 
+	const pageRoute = `api/CCs/${filename.replace(/\.md$/, "")}`;
+	const ctx = createTypeRenderContext(
+		file.getProject(),
+		pageRoute,
+		linkTargets,
+	);
+
 	// Enumerate all useful public methods
 	const ignoredMethods = new Set([
 		"supportsCommand",
@@ -355,14 +167,83 @@ async function processCCDocFile(
 
 	for (const method of methods) {
 		const signatures = method.getOverloads();
+		const targets = signatures.length > 0 ? signatures : [method];
+		const print = signatures.length > 0
+			? printOverload
+			: printMethodDeclaration;
+
+		let printed: string[];
+
+		// Compound options parameters read better as one overload per variant.
+		// Hand-written overloads take precedence.
+		const distribution = signatures.length === 0
+			? (() => {
+				try {
+					return tryDistributeCompoundParameter(method, ctx);
+				} catch {
+					return undefined;
+				}
+			})()
+			: undefined;
+
+		if (distribution) {
+			printed = distribution.variants.map((variant) => {
+				const param = method
+					.getParameters()[distribution.parameterIndex];
+				let removedParam:
+					| ReturnType<typeof param.getStructure>
+					| undefined;
+				if (variant.empty) {
+					// The "none" branch of an optional AllOrNone parameter:
+					// print the method without the parameter
+					removedParam = param.getStructure();
+					param.remove();
+				} else {
+					param
+						.getTypeNodeOrThrow()
+						.replaceWithText(variant.typeText);
+				}
+				transformSignature(method, ctx);
+				const signature = formatTransformedSignature(
+					printMethodDeclaration(method),
+				);
+				if (removedParam) {
+					method.insertParameter(
+						distribution.parameterIndex,
+						removedParam,
+					);
+				}
+				return variant.promotedComments.length
+					? variant.promotedComments.join("\n") + "\n" + signature
+					: signature;
+			});
+		} else {
+			printed = targets.map((target) => {
+				// Capture the unprocessed signature so transform failures
+				// degrade to today's output instead of breaking the page
+				const verbatim = print(target);
+				try {
+					const { changed } = transformSignature(target, ctx);
+					// Overlong single lines (e.g. from inferred return types)
+					// deserve wrapping even without a transformation
+					const needsFormatting = changed
+						|| verbatim.split("\n").some((line) =>
+							line.length > 80
+						);
+					if (!needsFormatting) return verbatim;
+					return formatTransformedSignature(print(target));
+				} catch (e: any) {
+					ctx.warnings.push(
+						`Falling back to unprocessed signature for ${ccName}.${method.getName()}: ${e.message}`,
+					);
+					return verbatim;
+				}
+			});
+		}
 
 		text += `### \`${method.getName()}\`
 \`\`\`ts
-${
-			signatures.length > 0
-				? signatures.map(printOverload).join("\n\n")
-				: printMethodDeclaration(method)
-		}
+${printed.join("\n\n")}
 \`\`\`
 
 `;
@@ -413,7 +294,7 @@ ${
 
 	// List defined value IDs
 	const valueIDsConst = (() => {
-		for (const stmt of dtsFile.getVariableStatements()) {
+		for (const stmt of file.getVariableStatements()) {
 			if (!stmt.hasExportKeyword()) continue;
 			for (const decl of stmt.getDeclarations()) {
 				if (decl.getName()?.endsWith("CCValues")) {
@@ -427,11 +308,17 @@ ${
 
 		const type = valueIDsConst.getType();
 		const formatValueType = (type: Type<ts.Type>): string => {
+			const typeText = type.getText(
+				valueIDsConst,
+				TypeFormatFlags.NoTruncation,
+			);
+			if (formattedValueTypeCache.has(typeText)) {
+				return formattedValueTypeCache.get(typeText)!;
+			}
 			const prefix = "type _ = ";
 			let ret = formatWithDprint(
 				"type.ts",
-				prefix
-					+ type.getText(valueIDsConst, TypeFormatFlags.NoTruncation),
+				prefix + typeText,
 			)
 				.trim()
 				.slice(prefix.length, -1);
@@ -442,6 +329,7 @@ ${
 				.replaceAll(/^(\s+)readonly /gm, "$1")
 				.replaceAll(/;$/gm, ",");
 
+			formattedValueTypeCache.set(typeText, ret);
 			return ret;
 		};
 
@@ -530,10 +418,14 @@ ${
 				hasPrintedHeader = true;
 			}
 
+			const formattedValueType = formatValueType(idType);
+			collectTypeNamesFromText(callSignature, ctx);
+			collectTypeNamesFromText(formattedValueType, ctx);
+
 			text += `### \`${value.getName()}${callSignature}\`
 
 \`\`\`ts
-${formatValueType(idType)}
+${formattedValueType}
 \`\`\`
 `;
 
@@ -598,12 +490,163 @@ ${formatValueType(idType)}
 		}
 	}
 
+	text += renderEmbeddedTypesSection(ctx);
+
+	for (const warning of ctx.warnings) {
+		console.warn(c.yellow(`${ccName} CC: ${warning}`));
+	}
+
 	text = text.replaceAll("\r\n", "\n");
 	text = formatWithDprint(filename, text);
 
 	await fsp.writeFile(path.join(ccDocsDir, filename), text, "utf8");
 
-	return { generatedIndex, generatedSidebar };
+	return {
+		generatedIndex,
+		generatedSidebar,
+		pageRoute,
+		embeds: [...ctx.embeds.values()],
+		referenced: [...ctx.referenced.keys()],
+		unresolved: Object.fromEntries(ctx.unresolved),
+	};
+}
+
+/** Reads all hand-written API pages once; path → content */
+async function readApiPages(): Promise<Map<string, string>> {
+	const apiDocsDir = path.join(docsDir, "api");
+	const files = (await fsp.readdir(apiDocsDir, { withFileTypes: true }))
+		.filter((e) => e.isFile() && e.name.endsWith(".md"))
+		.map((e) => path.join(apiDocsDir, e.name));
+	const contents = await Promise.all(
+		files.map((f) => fsp.readFile(f, "utf8")),
+	);
+	return new Map(files.map((f, i) => [f, contents[i]]));
+}
+
+/**
+ * Detects link targets for types documented on hand-written API pages:
+ * a `### TypeName` heading directly followed by an import marker and/or a
+ * TS code block with the definition. Only exact-name headings are used, so
+ * the plugin is never fed ambiguous data from e.g. migration guides.
+ */
+function collectLinkTargets(
+	apiPages: ReadonlyMap<string, string>,
+): Map<string, { route: string; definition?: string }> {
+	const candidates = new Map<
+		string,
+		{ route: string; definition?: string }[]
+	>();
+
+	const headingDefinitionRegex =
+		/^#{2,4}\s+(?<heading>.+?)\s*$\r?\n+(?:\s*<!-- #import (?<symbol>\w+) from ".*?".*?-->\s*\r?\n+)?(?:`{3,4}ts\r?\n(?<fence>[\s\S]*?)\r?\n`{3,4})?/gm;
+
+	for (const [file, content] of apiPages) {
+		const pagePath = path
+			.relative(docsDir, file)
+			.replaceAll(path.sep, "/");
+		for (const match of content.matchAll(headingDefinitionRegex)) {
+			const { heading, symbol, fence } = match.groups!;
+			if (!symbol && !fence) continue;
+			const name = symbol
+				?? heading.replaceAll("`", "").trim();
+			// Method and property headings also precede code fences; only
+			// PascalCase headings above an actual type definition count
+			if (!/^[A-Z][$\w]*$/.test(name)) continue;
+			if (
+				!symbol
+				&& !/^(?:abstract\s+)?(?:interface|type|enum|class)\b/.test(
+					fence.trim(),
+				)
+			) {
+				continue;
+			}
+			if (docsifySlugify(heading) !== docsifySlugify(name)) continue;
+			const route = docsifyRoute(pagePath, heading);
+			if (!candidates.has(name)) candidates.set(name, []);
+			candidates.get(name)!.push({
+				route,
+				definition: fence?.trim() || undefined,
+			});
+		}
+	}
+
+	const targets = new Map<string, { route: string; definition?: string }>();
+	for (const [symbol, entries] of candidates) {
+		// The shared types page is the canonical location
+		const preferred = entries.find((e) => e.route.includes("shared-types"));
+		if (preferred) {
+			targets.set(symbol, preferred);
+		} else if (entries.length === 1) {
+			targets.set(symbol, entries[0]);
+		} else {
+			console.warn(
+				c.yellow(
+					`Type ${symbol} is documented on multiple pages (${
+						entries.map((e) => e.route).join(", ")
+					}) and will not be linked. Move it to the shared types page to disambiguate.`,
+				),
+			);
+		}
+	}
+	return targets;
+}
+
+// Threshold for inclusion on shared-types.md; types referenced on fewer pages
+// belong on the page that uses them
+const SHARED_TYPE_MIN_PAGES = 2;
+
+function auditSharedTypes(
+	ccPageRefCount: ReadonlyMap<string, number>,
+	apiPages: ReadonlyMap<string, string>,
+): void {
+	const sharedPath = path.join(docsDir, "api/shared-types.md");
+	const content = apiPages.get(sharedPath);
+	if (content == undefined) return;
+
+	const entries: { name: string; fence: string }[] = [];
+	const entryRegex =
+		/^#{2,4}\s+`(?<name>\w+)`[\s\S]*?```ts\r?\n(?<fence>[\s\S]*?)\r?\n```/gm;
+	for (const match of content.matchAll(entryRegex)) {
+		entries.push({ name: match.groups!.name, fence: match.groups!.fence });
+	}
+
+	const apiContents = [...apiPages]
+		.filter(([file]) => file !== sharedPath)
+		.map(([, text]) => text);
+
+	for (const { name } of entries) {
+		const wordRegex = new RegExp(`\\b${name}\\b`);
+		// A type used only inside another entry's definition keeps that entry
+		// self-contained and earns its place regardless of standalone usage
+		const isCompanion = entries.some(
+			(e) => e.name !== name && wordRegex.test(e.fence),
+		);
+		if (isCompanion) continue;
+
+		const ccCount = ccPageRefCount.get(name) ?? 0;
+		const apiCount = apiContents.filter((text) =>
+			wordRegex.test(text)
+		).length;
+		if (
+			ccCount < SHARED_TYPE_MIN_PAGES
+			&& apiCount < SHARED_TYPE_MIN_PAGES
+		) {
+			console.warn(
+				c.yellow(
+					`Type ${name} is on shared-types.md but only referenced by ${ccCount} CC page(s) and ${apiCount} API page(s). Consider embedding it on the page that uses it instead.`,
+				),
+			);
+		}
+	}
+}
+
+// Types referenced on this many CC pages without a documented definition fail the build
+const UNRESOLVED_PAGE_THRESHOLD = 3;
+const MAX_TOOLTIP_DEFINITION_LENGTH = 1500;
+
+function capDefinition(definition: string): string {
+	if (definition.length <= MAX_TOOLTIP_DEFINITION_LENGTH) return definition;
+	return definition.slice(0, MAX_TOOLTIP_DEFINITION_LENGTH) + "\n// …";
 }
 
 /** Generates CC documentation, returns true if there was an error */
@@ -638,15 +681,120 @@ async function generateCCDocs(
 	let generatedIndex = "";
 	let generatedSidebar = "";
 
+	const apiPages = await readApiPages();
+	const linkTargets = collectLinkTargets(apiPages);
+	const linkTargetRoutes = Object.fromEntries(
+		[...linkTargets].map(([name, { route }]) => [name, route]),
+	);
+
 	// Process them in parallel
 	const tasks = ccFiles.map((f) =>
-		piscina.run(f.getFilePath(), { name: "processCC" })
+		piscina.run(
+			{ filename: f.getFilePath(), linkTargets: linkTargetRoutes },
+			{ name: "processCC" },
+		)
 	);
-	const results = await Promise.all(tasks);
+	const results: (CCDocFileResult | undefined)[] = await Promise.all(tasks);
+
+	// name → docsify route + hover definition/description for the type-links plugin
+	const typeLinks = new Map<
+		string,
+		{ href: string; definition?: string; description?: string }
+	>();
+	// Conflicting embed definitions must not be linked at all
+	const droppedTypeLinks = new Set<string>();
+	const unresolvedPages = new Map<
+		string,
+		{ pages: string[]; declPath: string }
+	>();
+	// How many CC pages reference each type; used to audit the shared-types page
+	const ccPageRefCount = new Map<string, number>();
+
 	for (const result of results) {
-		if (result) {
-			generatedIndex += result.generatedIndex;
-			generatedSidebar += result.generatedSidebar;
+		if (!result) continue;
+		generatedIndex += result.generatedIndex;
+		generatedSidebar += result.generatedSidebar;
+
+		for (const name of result.referenced) {
+			ccPageRefCount.set(name, (ccPageRefCount.get(name) ?? 0) + 1);
+		}
+
+		for (const embed of result.embeds) {
+			if (droppedTypeLinks.has(embed.name)) continue;
+			const capped = capDefinition(embed.definition);
+			const existing = typeLinks.get(embed.name);
+			if (!existing) {
+				typeLinks.set(embed.name, {
+					href: docsifyRoute(result.pageRoute, embed.name),
+					definition: capped,
+					description: embed.description,
+				});
+			} else if (existing.definition !== capped) {
+				typeLinks.delete(embed.name);
+				droppedTypeLinks.add(embed.name);
+				console.warn(
+					c.yellow(
+						`Type name ${embed.name} has conflicting definitions across CC pages and will not be linked`,
+					),
+				);
+			}
+		}
+
+		for (const [name, declPath] of Object.entries(result.unresolved)) {
+			if (!unresolvedPages.has(name)) {
+				unresolvedPages.set(name, { pages: [], declPath });
+			}
+			unresolvedPages.get(name)!.pages.push(result.pageRoute);
+		}
+	}
+
+	// Hand-written pages provide the canonical definitions for shared types.
+	// Their JSDoc description comes from the source declaration, so tooltips
+	// carry it too.
+	for (const [name, { route, definition }] of linkTargets) {
+		const decl = resolveDeclByName(program, name);
+		typeLinks.set(name, {
+			href: route,
+			definition: definition && capDefinition(definition),
+			description: decl && getJsDocDescription(decl),
+		});
+	}
+	for (const [name, strategy] of typeRegistry) {
+		if (typeof strategy === "object") {
+			typeLinks.set(name, { href: `#/${strategy.link}` });
+		}
+	}
+
+	await fsp.mkdir(path.join(docsDir, "generated"), { recursive: true });
+	await fsp.writeFile(
+		path.join(docsDir, "generated/type-links.json"),
+		JSON.stringify(
+			Object.fromEntries(
+				[...typeLinks].toSorted(([a], [b]) => a.localeCompare(b)),
+			),
+			undefined,
+			"\t",
+		) + "\n",
+		"utf8",
+	);
+
+	// Warn about types on the shared-types page that are not actually shared
+	auditSharedTypes(ccPageRefCount, apiPages);
+
+	// Frequently used types must be documented somewhere
+	let hasErrors = false;
+	for (
+		const [name, { pages, declPath }] of [...unresolvedPages].toSorted(
+			(a, b) => b[1].pages.length - a[1].pages.length,
+		)
+	) {
+		const message =
+			`Type ${name} (${declPath}) is referenced on ${pages.length} CC page(s) but has no documented definition. Add it to docs/api/shared-types.md or the type registry.`;
+		if (pages.length >= UNRESOLVED_PAGE_THRESHOLD) {
+			console.error(c.red(message));
+			hasErrors = true;
+		} else {
+			console.warn(c.yellow(message));
 		}
 	}
 
@@ -680,7 +828,7 @@ async function generateCCDocs(
 		"utf8",
 	);
 
-	return false;
+	return hasErrors;
 }
 
 async function main(): Promise<void> {
@@ -708,20 +856,19 @@ function getProgram(): Project {
 }
 
 export async function processCC(
-	filename: string,
-): Promise<{ generatedIndex: string; generatedSidebar: any } | undefined> {
+	task: { filename: string; linkTargets: Record<string, string> },
+): Promise<CCDocFileResult | undefined> {
 	const program = getProgram();
-	const sourceFile = program.getSourceFileOrThrow(filename);
-	const dtsFile = program.addSourceFileAtPath(
-		filename.replace("/src/", "/build/esm/").replace(
-			/(?<!\.d)\.ts$/,
-			".d.ts",
-		),
-	);
+	const sourceFile = program.getSourceFileOrThrow(task.filename);
 	try {
-		return await processCCDocFile(sourceFile, dtsFile);
+		return await processCCDocFile(
+			sourceFile,
+			new Map(Object.entries(task.linkTargets)),
+		);
 	} catch (e: any) {
-		throw new Error(`Error processing CC file: ${filename}\n${e.stack}`);
+		throw new Error(
+			`Error processing CC file: ${task.filename}\n${e.stack}`,
+		);
 	}
 }
 

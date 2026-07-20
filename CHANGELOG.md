@@ -4,6 +4,173 @@
 <!--
 	Add placeholder for next release with `wip` snippet
 -->
+## 15.26.0 (2026-07-17)
+### Features
+* Added support for proprietary controller commands on Aeotec and Z-Wave.me controllers (#8949)
+* Ongoing interviews are now paused during inclusion, security bootstrapping and exclusion. This should greatly improve the reliability when adding multiple devices at once. (#8951)
+
+### Bugfixes
+* Added a work around for some locks incorrectly reporting 0 steps remaining immediately after starting credential learning (#8976)
+* Increased timeouts for bulk-deleting users/credentials, which can take significantly longer than 1 second on some locks (#8978)
+* Fixed several issues that could lead to stale credentials being cached (#8977, #8966)
+
+### Config file changes
+* Add UltraPro 800 Series On/Off Switch (#8973)
+* Add UltraPro 800 Series dimmer (#8972)
+* Add GR-105N device configuration (#8960)
+* Add Nexa ZPR-111 parameters (#8495)
+* Correct and clean up all Fibaro device files (#8955)
+* Fix broken link to Honeywell T6 Pro manual (#8970)
+
+### Changes under the hood
+* The development MCP server is now able to search for config parameters semantically, allowing AI agents to spot similar parameters and matching templates (#8958, #8974)
+
+## 15.25.3 (2026-07-09)
+### Bugfixes
+* Added missing exports for `AssociationGroupInfo`, `UserCode` and `EndpointCapability` types (#8933)
+* Correct Irrigation CC `nominalCurrent` metadata and low flow error label (#8932)
+* Fixed an incorrect assertion in the Window Covering CC `setValue` API (#8931)
+
+### Config file changes
+* Correct Schneider Electric SQR44102 state-after-power-failure values (#8944)
+* Override supported thermostat modes for Fibaro FGT-001 (#8921)
+
+### Changes under the hood
+* Parallelize integration tests, avoid unnecessary timeouts (#8935)
+* Our documentation for CC-specific APIs now includes related types, and types are now turned into links to their definition and previewed on hover (#8936)
+
+## 15.25.2 (2026-07-03)
+### Bugfixes
+* When sending S2 encapsulated commands with delivery verification, receiving a command with the next expected sequence number is now treated as a delivery verification instead of continuing to wait for a potential `NonceReport` (#8906)
+* Fixes an issue where cached User Code CC values could get out of sync by using the unified Access Control API on devices supporting Supervision (#8927)
+* When devices are not known to the firmware update service, this information is now cached instead of causing repeated checks (#8926)
+* On slow devices, Z-Wave JS now distinguishes between actuator and non-actuator command classes when deciding whether a value should be updated optimistically (#8911)
+
+### Config file changes
+* Correct value size for Zooz ZEN78, params 13/14 (#8904)
+* Add Fortune Brands YRD4X0-F-ZW4 (#8892)
+* Add fingerprint for Leviton VRCZ4-1LX (#8907)
+
+### Changes under the hood
+* Migrate device interviews to the task scheduler (#8923)
+* Migrate NVM backup/restore and OTW updates to the task scheduler (#8925)
+* Migrate node value refresh to the task scheduler (#8924)
+* Improve argument assertions in AccessControl API (#8894)
+
+## 15.25.1 (2026-06-25)
+### Config file changes
+* Correct MCOHome MH-5900 parameters (#8565)
+* Add missing product ID 0x01ba for SimonTech 10002020-13X (#8897)
+* Add missing product IDs for SimonTech 10002080-13X Roller Blind (#8896)
+* Align all Zooz devices with the documentation, update to latest firmwares (#8899)
+* Add Versa Wireless LAMP-ZW2 (#8889)
+
+### Changes under the hood
+* Fixed the "not equal" version comparison in conditional logic (#8898)
+* The development MCP server has gained tools for navigating and understanding template imports in config files (#8903)
+
+## 15.25.0 (2026-06-18)
+### Features
+* Added support for reporting granular interview progress (0-100%) using the new `"interview progress"` event (#8886)
+
+### Bugfixes
+* Improve handling of report-type CCs that are split across multiple frames (#8885)
+
+## 15.24.3 (2026-06-15)
+### Bugfixes
+* When the serial port fails to reopen during controller recovery, the driver will now emit a `Driver_Failed` error instead of silently getting stuck with a closed port (#8861)
+* Controlled CCs in the NIF are no longer ignored. This affected primarily `Scene Activation CC` (#8864)
+* Fixed an issue where the payload length of `NodeNamingAndLocationCC` reports was not validated correctly (#8865)
+* Fixed an issue where the name length of `Association Group Info CC Name Report` was not validated correctly (#8875)
+* Fixed several issues where miscellaneous fields in reports were not validated correctly (#8876)
+* Fixed a driver crash that could happen when receiving a certain misformed Notification Report (#8874)
+* When clearing credentials/users on locks with `User Code CC` through the unified `AccessControl` API, the corresponding cache values are now cleared rather than deleted, mirroring how they appear when the lock reports them as empty (#8866)
+* Fixed an issue where multicast/broadcast commands with a target endpoint would fail unless all target nodes' endpoints had been interviewed (#8882)
+* The interview procedure for User Code CC and User Credential CC on locks supporting both now correctly follows the specification. Z-Wave JS now correctly defers to `User Code CC` on those locks if `User Credential CC` is not active. (#8879)
+* Setting user codes on `User Code CC v1` locks that obfuscate the codes in responses should now longer result in an error claiming the lock rejected the credential for an unknown reason (#8884)
+
+### Config file changes
+* Add fingerprints to Kwikset HC620 (#8858, #8872)
+* Correct label of "Twist Assist" parameter on Danalock V3-BTZE, limit to FW < 0.22 (#8860)
+* Add AUS/NZ fingerprint to Aeotec Water Sensor 7 Pro (#8883)
+* Update Zooz ZEN35 for firmware 1.40 and unique dimmer wording (#8871)
+* Add Jasco 76592 (ZWN4016) In-Wall Smart Switch (#8867)
+
+### Changes under the hood
+* Tests now support connecting the driver to the mock port via TCP (#8863)
+
+## 15.24.2 (2026-06-01)
+### Bugfixes
+* Verify new state after Protection CC Set (#8831)
+* Add the missing possibility of adding users and credentials together in one call through the unified credential management API on devices using User Code CC (#8837)
+* Fixed an issue where bulk deletion of users and credentials would purge the cache after issuing the deletion event, causing applications to read stale data (#8829)
+* Work around an issue with some controllers that could not enter inclusion mode because the SUC was missing from the network (#8842)
+
+### Config file changes
+* Add lifeline association and remove Binary Switch CC for iBlinds v2 (#8830)
+* Add new fingerprint for Honeywell TH6320ZW2007 (#8841)
+
+### Changes under the hood
+* Speed up typed documentation generation process (#8843)
+
+## 15.24.0 (2026-05-12)
+### Features
+* Implement bulk-delete APIs for credentials (#8793)
+
+### Config file changes
+* Map Basic Set to Binary Sensor for Fibaro FGMS001 (#8765)
+
+## 15.23.5 (2026-04-27)
+### Bugfixes
+* Fixed an issue where the response after setting a duplicate PIN would not be properly matched to the controlling command, causing a timeout (#8761)
+
+### Config file changes
+* Update parameters for Zooz ZSE44 firmware 2.40 (#8759)
+
+## 15.23.4 (2026-04-22)
+Changed the names of result-type enums on the `endpoint.accessControl` API from `...Status` to `...Result`
+
+## 15.23.3 (2026-04-22)
+This release continues to iterate on the new `endpoint.accessControl` API:
+* Credential slots are considered global per device, not user specific.
+* Set-type credential management methods return specific error types that give more information about what failed.
+
+### Bugfixes
+* Fixed an issue where connection to encrypted ESPHome Z-Wave proxies would fail when unrelated commands were received during the handshake (#8721)
+* Interviewed Notification CC capabilities are no longer overwritten when applying alarm mappings (#8755)
+
+### Config file changes
+* Add Philio PAC03 Mitsubishi IT adapter (#8748)
+
+## 15.23.2 (2026-04-15)
+This release iterates on the new `endpoint.accessControl` again, making that property `undefined` when none of the required command classes are supported.
+
+## 15.23.1 (2026-04-14)
+The unified API for credential management introduced in `v15.23.0` is now accessible through `endpoint.accessControl` instead of living directly on the endpoint.
+This change paves the way for similar high-level feature APIs to be added in the future without polluting the `Endpoint` class signature.
+
+This is technically a breaking change, but we expect that this API is not being used yet, so we're going to do some emotional versioning for this release and call it a patch.
+
+### Bugfixes
+* Failed locking attempts through the `Door Lock CC` `setValue` API are no longer silently ignored (#8749)
+
+### Config file changes
+* Add HomeSeer PS100 v2 (#8737)
+
+## 15.23.0 (2026-04-10)
+### Features
+* Implement Thermostat Operating State CC V2 (#8630)
+* Support User Credential CC V1/V2 (#8629)
+* Add unified API to manage users and credentials across User Code CC and User Credential CC (#8738)
+
+### Bugfixes
+* Lower NVM backup chunk size for Z-Wave.me UZB (#8730)
+
+### Config file changes
+* Add Inovelli VZW30-SN config (#8683)
+* Improve Inovelli VZW30-SN, VZW31-SN, and VZW32-SN config files (#8597, #8598, #8626, #8728)
+* Standardize "Control Associated Device" triggers across 7x series Zooz switches (#8642)
+
 ## 15.22.5 (2026-03-30)
 ### Bugfixes
 * Fixed unwanted delays in `Node.pollValue` called by user/application code (#8726)

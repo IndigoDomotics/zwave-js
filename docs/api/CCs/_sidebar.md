@@ -21,6 +21,7 @@
   - [Endpoint](api/endpoint.md)
   - [Virtual nodes and endpoints](api/virtual-node-endpoint.md)
   - [Values and Metadata](api/valueid.md)
+  - [Shared types](api/shared-types.md)
   - [ConfigManager](api/config-manager.md)
   - [Registries](api/registries.md)
   - [Utilities](api/utils.md)
@@ -87,6 +88,7 @@
     - [Time CC](api/CCs/Time.md)
     - [Time Parameters CC](api/CCs/TimeParameters.md)
     - [User Code CC](api/CCs/UserCode.md)
+    - [User Credential CC](api/CCs/UserCredential.md)
     - [Version CC](api/CCs/Version.md)
     - [Wake Up CC](api/CCs/WakeUp.md)
     - [Window Covering CC](api/CCs/WindowCovering.md)
@@ -124,6 +126,7 @@
 
   - [Introduction](development/intro.md)
   - [Implementing a Command Class](development/implementing-cc.md)
+  - [Type rendering in the docs](development/documenting-types.md)
   - [Installing from GitHub](development/installing-from-github.md)
   - [Releasing](development/releasing.md)
 

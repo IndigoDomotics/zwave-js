@@ -15,6 +15,7 @@ import {
 	ZWaveErrorCodes,
 	getNodeTag,
 	highResTimestamp,
+	logBuffer,
 } from "@zwave-js/core";
 import { createReflectionDecorator } from "@zwave-js/core/reflection";
 import {
@@ -297,9 +298,7 @@ export class Message {
 
 		return {
 			tags,
-			message: this.payload.length > 0
-				? { payload: `0x${this.payload.toString("hex")}` }
-				: undefined,
+			message: { payload: logBuffer(this.payload) },
 		};
 	}
 
@@ -372,6 +371,9 @@ export class Message {
 
 	/** Returns a message specific timeout used to wait for an update from the target node */
 	public nodeUpdateTimeout: number | undefined; // Default: use driver timeout
+
+	/** Whether the update from the target node should not be awaited, e.g. because something else is already waiting for it */
+	public ignoreNodeUpdate: boolean = false;
 
 	/** Checks if a message is an expected response for this message */
 	public isExpectedResponse(msg: Message): boolean {
@@ -516,8 +518,8 @@ export const messageTypes = messageTypesDecorator.decorator;
 /**
  * Retrieves the message type defined for a Z-Wave message class
  */
-export function getMessageType<T extends Message>(
-	messageClass: T,
+export function getMessageType(
+	messageClass: Message,
 ): MessageType | undefined {
 	return messageTypesDecorator.lookupValue(messageClass)?.messageType;
 }
@@ -525,8 +527,8 @@ export function getMessageType<T extends Message>(
 /**
  * Retrieves the message type defined for a Z-Wave message class
  */
-export function getMessageTypeStatic<T extends MessageConstructor<Message>>(
-	classConstructor: T,
+export function getMessageTypeStatic(
+	classConstructor: MessageConstructor<Message>,
 ): MessageType | undefined {
 	return messageTypesDecorator.lookupValueStatic(classConstructor)
 		?.messageType;
@@ -535,8 +537,8 @@ export function getMessageTypeStatic<T extends MessageConstructor<Message>>(
 /**
  * Retrieves the function type defined for a Z-Wave message class
  */
-export function getFunctionType<T extends Message>(
-	messageClass: T,
+export function getFunctionType(
+	messageClass: Message,
 ): FunctionType | undefined {
 	return messageTypesDecorator.lookupValue(messageClass)?.functionType;
 }
@@ -544,8 +546,8 @@ export function getFunctionType<T extends Message>(
 /**
  * Retrieves the function type defined for a Z-Wave message class
  */
-export function getFunctionTypeStatic<T extends MessageConstructor<Message>>(
-	classConstructor: T,
+export function getFunctionTypeStatic(
+	classConstructor: MessageConstructor<Message>,
 ): FunctionType | undefined {
 	return messageTypesDecorator.lookupValueStatic(classConstructor)
 		?.functionType;
@@ -582,8 +584,8 @@ export const expectedResponse = expectedResponseDecorator.decorator;
 /**
  * Retrieves the expected response function type or message class defined for a Z-Wave message class
  */
-export function getExpectedResponse<T extends Message>(
-	messageClass: T,
+export function getExpectedResponse(
+	messageClass: Message,
 ): FunctionType | typeof Message | ResponsePredicate | undefined {
 	return expectedResponseDecorator.lookupValue(messageClass);
 }
@@ -591,10 +593,8 @@ export function getExpectedResponse<T extends Message>(
 /**
  * Retrieves the function type defined for a Z-Wave message class
  */
-export function getExpectedResponseStatic<
-	T extends MessageConstructor<Message>,
->(
-	classConstructor: T,
+export function getExpectedResponseStatic(
+	classConstructor: MessageConstructor<Message>,
 ): FunctionType | typeof Message | ResponsePredicate | undefined {
 	return expectedResponseDecorator.lookupValueStatic(classConstructor);
 }
@@ -625,8 +625,8 @@ export function expectedCallback<TSent extends typeof Message>(
 /**
  * Retrieves the expected callback function type or message class defined for a Z-Wave message class
  */
-export function getExpectedCallback<T extends Message>(
-	messageClass: T,
+export function getExpectedCallback(
+	messageClass: Message,
 ): FunctionType | typeof Message | ResponsePredicate | undefined {
 	return expectedCallbackDecorator.lookupValue(messageClass);
 }
@@ -634,10 +634,8 @@ export function getExpectedCallback<T extends Message>(
 /**
  * Retrieves the function type defined for a Z-Wave message class
  */
-export function getExpectedCallbackStatic<
-	T extends MessageConstructor<Message>,
->(
-	classConstructor: T,
+export function getExpectedCallbackStatic(
+	classConstructor: MessageConstructor<Message>,
 ): FunctionType | typeof Message | ResponsePredicate | undefined {
 	return expectedCallbackDecorator.lookupValueStatic(classConstructor);
 }
@@ -660,8 +658,8 @@ export const priority = priorityDecorator.decorator;
 /**
  * Retrieves the default priority defined for a Z-Wave message class
  */
-export function getDefaultPriority<T extends Message>(
-	messageClass: T,
+export function getDefaultPriority(
+	messageClass: Message,
 ): MessagePriority | undefined {
 	return priorityDecorator.lookupValue(messageClass);
 }
@@ -669,8 +667,8 @@ export function getDefaultPriority<T extends Message>(
 /**
  * Retrieves the default priority defined for a Z-Wave message class
  */
-export function getDefaultPriorityStatic<T extends MessageConstructor<Message>>(
-	classConstructor: T,
+export function getDefaultPriorityStatic(
+	classConstructor: MessageConstructor<Message>,
 ): MessagePriority | undefined {
 	return priorityDecorator.lookupValueStatic(classConstructor);
 }

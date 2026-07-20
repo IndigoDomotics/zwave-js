@@ -49,9 +49,7 @@ import {
 	ThermostatOperatingState,
 	ThermostatSetpointType,
 	type UserCredentialKeyLockerEntryType,
-	UserCredentialRule,
-	UserCredentialType,
-	UserCredentialUserType,
+	type UserCredentialType,
 	type ValveId,
 	Weekday,
 	WindowCoveringParameter,
@@ -4619,7 +4617,7 @@ export const IrrigationCCValues = Object.freeze({
 				} as const),
 				get meta() {
 					return {
-						...ValueMetadata.ReadOnlyBoolean,
+						...ValueMetadata.ReadOnlyNumber,
 						label: `${
 							irrigationValveIdToMetadataPrefix(
 								valveId,
@@ -5145,7 +5143,7 @@ export const IrrigationCCValues = Object.freeze({
 							irrigationValveIdToMetadataPrefix(
 								valveId,
 							)
-						}: Error - Flow below high threshold`,
+						}: Error - Flow below low threshold`,
 					} as const;
 				},
 			};
@@ -9494,13 +9492,7 @@ export const UserCredentialCCValues = Object.freeze({
 					propertyKey: propertyKey,
 				} as const),
 				get meta() {
-					return {
-						...ValueMetadata.ReadOnlyUInt8,
-						label: `User type (${userId})`,
-						states: enumValuesToMetadataStates(
-							UserCredentialUserType,
-						),
-					} as const;
+					return ValueMetadata.Any;
 				},
 			};
 		},
@@ -9513,7 +9505,7 @@ export const UserCredentialCCValues = Object.freeze({
 						&& typeof propertyKey === "number")(valueId);
 			},
 			options: {
-				internal: false,
+				internal: true,
 				minVersion: 1,
 				secret: false,
 				stateful: true,
@@ -9540,10 +9532,7 @@ export const UserCredentialCCValues = Object.freeze({
 					propertyKey: propertyKey,
 				} as const),
 				get meta() {
-					return {
-						...ValueMetadata.Boolean,
-						label: `Active (${userId})`,
-					} as const;
+					return ValueMetadata.Any;
 				},
 			};
 		},
@@ -9556,7 +9545,7 @@ export const UserCredentialCCValues = Object.freeze({
 						&& typeof propertyKey === "number")(valueId);
 			},
 			options: {
-				internal: false,
+				internal: true,
 				minVersion: 1,
 				secret: false,
 				stateful: true,
@@ -9583,11 +9572,7 @@ export const UserCredentialCCValues = Object.freeze({
 					propertyKey: propertyKey,
 				} as const),
 				get meta() {
-					return {
-						...ValueMetadata.ReadOnlyUInt8,
-						label: `Credential rule (${userId})`,
-						states: enumValuesToMetadataStates(UserCredentialRule),
-					} as const;
+					return ValueMetadata.Any;
 				},
 			};
 		},
@@ -9600,7 +9585,7 @@ export const UserCredentialCCValues = Object.freeze({
 						&& typeof propertyKey === "number")(valueId);
 			},
 			options: {
-				internal: false,
+				internal: true,
 				minVersion: 1,
 				secret: false,
 				stateful: true,
@@ -9627,10 +9612,7 @@ export const UserCredentialCCValues = Object.freeze({
 					propertyKey: propertyKey,
 				} as const),
 				get meta() {
-					return {
-						...ValueMetadata.ReadOnlyUInt16,
-						label: `Expiring timeout minutes (${userId})`,
-					} as const;
+					return ValueMetadata.Any;
 				},
 			};
 		},
@@ -9643,7 +9625,7 @@ export const UserCredentialCCValues = Object.freeze({
 						&& typeof propertyKey === "number")(valueId);
 			},
 			options: {
-				internal: false,
+				internal: true,
 				minVersion: 1,
 				secret: false,
 				stateful: true,
@@ -9670,10 +9652,7 @@ export const UserCredentialCCValues = Object.freeze({
 					propertyKey: propertyKey,
 				} as const),
 				get meta() {
-					return {
-						...ValueMetadata.ReadOnlyString,
-						label: `User name (${userId})`,
-					} as const;
+					return ValueMetadata.Any;
 				},
 			};
 		},
@@ -9686,7 +9665,7 @@ export const UserCredentialCCValues = Object.freeze({
 						&& typeof propertyKey === "number")(valueId);
 			},
 			options: {
-				internal: false,
+				internal: true,
 				minVersion: 1,
 				secret: false,
 				stateful: true,
@@ -9815,10 +9794,50 @@ export const UserCredentialCCValues = Object.freeze({
 			} as const satisfies CCValueOptions,
 		},
 	),
+	credentialOwner: Object.assign(
+		(type: UserCredentialType, slot: number) => {
+			const property = "credentialOwner";
+			const propertyKey = (type << 16) | slot;
+
+			return {
+				id: {
+					commandClass: CommandClasses["User Credential"],
+					property,
+					propertyKey,
+				} as const,
+				endpoint: (endpoint: number = 0) => ({
+					commandClass: CommandClasses["User Credential"],
+					endpoint,
+					property: property,
+					propertyKey: propertyKey,
+				} as const),
+				get meta() {
+					return ValueMetadata.Any;
+				},
+			};
+		},
+		{
+			is: (valueId: ValueID): boolean => {
+				return valueId.commandClass
+						=== CommandClasses["User Credential"]
+					&& (({ property, propertyKey }) =>
+						property === "credentialOwner"
+						&& typeof propertyKey === "number")(valueId);
+			},
+			options: {
+				internal: true,
+				minVersion: 1,
+				secret: false,
+				stateful: true,
+				supportsEndpoints: true,
+				autoCreate: true,
+			} as const satisfies CCValueOptions,
+		},
+	),
 	credentialModifierType: Object.assign(
-		(userId: number, type: UserCredentialType, slot: number) => {
+		(type: UserCredentialType, slot: number) => {
 			const property = "credentialModifierType";
-			const propertyKey = (userId << 24) | (type << 16) | slot;
+			const propertyKey = (type << 16) | slot;
 
 			return {
 				id: {
@@ -9856,9 +9875,9 @@ export const UserCredentialCCValues = Object.freeze({
 		},
 	),
 	credentialModifierNodeId: Object.assign(
-		(userId: number, type: UserCredentialType, slot: number) => {
+		(type: UserCredentialType, slot: number) => {
 			const property = "credentialModifierNodeId";
-			const propertyKey = (userId << 24) | (type << 16) | slot;
+			const propertyKey = (type << 16) | slot;
 
 			return {
 				id: {
@@ -9896,9 +9915,9 @@ export const UserCredentialCCValues = Object.freeze({
 		},
 	),
 	credential: Object.assign(
-		(userId: number, type: UserCredentialType, slot: number) => {
+		(type: UserCredentialType, slot: number) => {
 			const property = "credential";
-			const propertyKey = (userId << 24) | (type << 16) | slot;
+			const propertyKey = (type << 16) | slot;
 
 			return {
 				id: {
@@ -9913,15 +9932,7 @@ export const UserCredentialCCValues = Object.freeze({
 					propertyKey: propertyKey,
 				} as const),
 				get meta() {
-					return {
-						...ValueMetadata.ReadOnlyBuffer,
-						label: `Credential (user ${userId}, ${
-							getEnumMemberName(
-								UserCredentialType,
-								type,
-							)
-						}, slot ${slot})`,
-					} as const;
+					return ValueMetadata.Any;
 				},
 			};
 		},
@@ -9934,7 +9945,7 @@ export const UserCredentialCCValues = Object.freeze({
 						&& typeof propertyKey === "number")(valueId);
 			},
 			options: {
-				internal: false,
+				internal: true,
 				minVersion: 1,
 				secret: true,
 				stateful: true,
@@ -9959,13 +9970,10 @@ export const UserCredentialCCValues = Object.freeze({
 				&& valueId.propertyKey == undefined;
 		},
 		get meta() {
-			return {
-				...ValueMetadata.String,
-				label: "Admin PIN Code",
-			} as const;
+			return ValueMetadata.Any;
 		},
 		options: {
-			internal: false,
+			internal: true,
 			minVersion: 1,
 			secret: true,
 			stateful: true,

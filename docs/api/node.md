@@ -916,7 +916,7 @@ This property tracks the status a node in the network currently has (or is belie
 - `NodeStatus.Unknown (0)` - this is the default status of a node. A node is assigned this status before it is being interviewed (including manual re-interviews when calling `refreshInfo`).
 - `NodeStatus.Asleep (1)` - Nodes that support the `WakeUp` CC and failed to respond to a message are assumed asleep.
 - `NodeStatus.Awake (2)` - Sleeping nodes that recently sent a wake up notification are marked awake until they are sent back to sleep or fail to respond to a message.
-- `NodeStatus.Dead (3)` - Nodes that **don't** support the `WakeUp` CC are marked dead when they fail to respond. Examples are plugs that have been pulled out of their socket. Whenever a message is received from a presumably dead node, they are marked as unknown.
+- `NodeStatus.Dead (3)` - Nodes that **don't** support the `WakeUp` CC are marked dead when they fail to respond. Examples are plugs that have been pulled out of their socket. Whenever a message is received from a presumably dead node, they are marked as alive.
 - `NodeStatus.Alive (4)` - Nodes that **don't** support the `WakeUp` CC are considered alive while they do respond. Note that the status may switch from alive to awake/asleep once it is discovered that a node does support the `WakeUp` CC.
 
 Changes of a node's status are broadcasted using the corresponding events - see below.
@@ -1017,7 +1017,7 @@ interface GenericDeviceClass {
 	readonly zwavePlusDeviceType?: string;
 	readonly requiresSecurity: boolean;
 	readonly maySupportBasicCC: boolean;
-	readonly supportsOptimisticValueUpdate: boolean;
+	readonly isSlowActuator: boolean;
 }
 ```
 
@@ -1310,6 +1310,46 @@ A state of the interview process for this node was completed. Only the name of t
 ```ts
 (node: ZWaveNode, stageName: string) => void
 ```
+
+> [!NOTE] This event is deprecated. It has been found that it is not very useful to report interview progress due to most of the interview happening in the `CommandClasses` stage.
+> It is recommended to instead use the `"interview progress"` event for granular interview progress reporting.
+
+### `"interview progress"`
+
+The interview made progress. This event is emitted frequently (throttled) during the interview and provides an approximate overall progress, which is useful to display a progress bar. The first and last interview stages are nearly instant, while interviewing the Command Classes takes the majority of the time, so the reported progress is weighted accordingly.
+
+```ts
+(node: ZWaveNode, progress: InterviewProgress) => void
+```
+
+<!-- #import InterviewProgress from "zwave-js" -->
+
+```ts
+interface InterviewProgress {
+	/**
+	 * The interview stage that is currently in progress.
+	 * `None` at the interview start, and `Complete` once the interview has finished.
+	 */
+	stage: InterviewStage;
+	/**
+	 * The approximate overall interview progress in %, rounded to two digits.
+	 */
+	progress: number;
+
+	/** During the `CommandClasses` stage: the index of the endpoint that is currently being interviewed */
+	endpoint?: number;
+	/** During the `CommandClasses` stage: the Command Class that is currently being interviewed */
+	commandClass?: CommandClasses;
+}
+```
+
+The `stage` is the current interview stage in progress, with two exceptions:
+
+- When the interview has just started, the stage is `None` and the progress is `0%`.
+- When the interview has completed, the stage is `Complete` and the progress is `100%`.
+
+> [!NOTE]
+> The progress is an approximation. It advances per Command Class, with finer-grained updates while interviewing some long-running CCs (e.g. Version, Configuration, Association). A single long-running CC that does not report its internal progress may pause the reported progress until it completes.
 
 ### `"interview completed"`
 

@@ -32,6 +32,9 @@ import {
 	isLongRangeNodeId,
 	isTransmissionError,
 	isZWaveError,
+	logDict,
+	logList,
+	logText,
 	parseBitMask,
 	parseCCList,
 	securityClassIsS2,
@@ -1024,6 +1027,7 @@ export class Security2CC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 		// Only on the highest security class the response includes the supported commands
 		const secClass = node.getHighestSecurityClass();
@@ -1207,21 +1211,21 @@ export class Security2CC extends CommandClass {
 			if (!hasReceivedSecureCommands && supportedCCs.length > 0) {
 				hasReceivedSecureCommands = true;
 
-				const logLines: string[] = [
-					`received secure commands (${
-						getEnumMemberName(
-							SecurityClass,
-							secClass,
-						)
-					})`,
-					"supported CCs:",
-				];
-				for (const cc of supportedCCs) {
-					logLines.push(`· ${getCCName(cc)}`);
-				}
 				ctx.logNode(node.id, {
 					endpoint: endpoint.index,
-					message: logLines.join("\n"),
+					message: logText([
+						`received secure commands (${
+							getEnumMemberName(
+								SecurityClass,
+								secClass,
+							)
+						})`,
+						"supported CCs:",
+					], {
+						nested: logList(
+							supportedCCs.map((cc) => getCCName(cc)),
+						),
+					}),
 					direction: "inbound",
 				});
 
@@ -1652,7 +1656,7 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 				iv,
 				securityClass: decryptionSecurityClass,
 			} = await decrypt());
-			if (!!authOK && !!plaintext) break;
+			if (authOK && !!plaintext) break;
 			// No need to try further SPANs if we just got the sender's EI
 			if (!!getSenderEI(extensions)) break;
 		}
@@ -1996,11 +2000,6 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 		const message: MessageRecord = {
 			"sequence number": this.sequenceNumber ?? "(not set)",
 		};
-		if (this.extensions.length > 0) {
-			message.extensions = this.extensions
-				.map((e) => e.toLogEntry())
-				.join("");
-		}
 		// Log the used keys in integration tests
 		if (
 			process.env.NODE_ENV === "test"
@@ -2034,7 +2033,10 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 
 		return {
 			...super.toLogEntry(ctx),
-			message,
+			message: logDict(
+				message,
+				this.extensions.map((e) => e.toLogEntry()),
+			),
 		};
 	}
 }
@@ -2330,16 +2332,22 @@ export class Security2CCKEXReport extends Security2CC {
 			...super.toLogEntry(ctx),
 			message: {
 				echo: this.echo,
-				"supported schemes": this.supportedKEXSchemes
-					.map((s) => `\n· ${getEnumMemberName(KEXSchemes, s)}`)
-					.join(""),
-				"supported ECDH profiles": this.supportedECDHProfiles
-					.map((s) => `\n· ${getEnumMemberName(ECDHProfiles, s)}`)
-					.join(""),
+				"supported schemes": logList(
+					this.supportedKEXSchemes.map((s) =>
+						getEnumMemberName(KEXSchemes, s)
+					),
+				),
+				"supported ECDH profiles": logList(
+					this.supportedECDHProfiles.map((s) =>
+						getEnumMemberName(ECDHProfiles, s)
+					),
+				),
 				"CSA requested": this.requestCSA,
-				"requested security classes": this.requestedKeys
-					.map((s) => `\n· ${getEnumMemberName(SecurityClass, s)}`)
-					.join(""),
+				"requested security classes": logList(
+					this.requestedKeys.map((s) =>
+						getEnumMemberName(SecurityClass, s)
+					),
+				),
 			},
 		};
 	}
@@ -2478,9 +2486,11 @@ export class Security2CCKEXSet extends Security2CC {
 					this.selectedECDHProfile,
 				),
 				"CSA permitted": this.permitCSA,
-				"granted security classes": this.grantedKeys
-					.map((s) => `\n· ${getEnumMemberName(SecurityClass, s)}`)
-					.join(""),
+				"granted security classes": logList(
+					this.grantedKeys.map((s) =>
+						getEnumMemberName(SecurityClass, s)
+					),
+				),
 			},
 		};
 	}
@@ -2787,10 +2797,9 @@ export class Security2CCCommandsSupportedReport extends Security2CC {
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported CCs": this.supportedCCs
-					.map((cc) => getCCName(cc))
-					.map((cc) => `\n· ${cc}`)
-					.join(""),
+				"supported CCs": logList(
+					this.supportedCCs.map((cc) => getCCName(cc)),
+				),
 			},
 		};
 	}

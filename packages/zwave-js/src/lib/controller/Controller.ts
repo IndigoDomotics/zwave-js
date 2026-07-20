@@ -96,6 +96,9 @@ import {
 	isLongRangeNodeId,
 	isValidDSK,
 	isZWaveError,
+	logDict,
+	logList,
+	logText,
 	nwiHomeIdFromDSK,
 	parseBitMask,
 	sdkVersionGt,
@@ -307,7 +310,11 @@ import { isObject } from "alcalzone-shared/typeguards";
 import type { Driver } from "../driver/Driver.js";
 import { cacheKeyUtils, cacheKeys } from "../driver/NetworkCache.js";
 import type { StatisticsEventCallbacks } from "../driver/Statistics.js";
-import { type TaskBuilder, TaskPriority } from "../driver/Task.js";
+import {
+	type TaskBuilder,
+	TaskInterruptBehavior,
+	TaskPriority,
+} from "../driver/Task.js";
 import { DeviceClass } from "../node/DeviceClass.js";
 import { ZWaveNode } from "../node/Node.js";
 import { VirtualNode } from "../node/VirtualNode.js";
@@ -352,6 +359,7 @@ import { SerialNVMIO500, SerialNVMIO700 } from "./NVMIO.js";
 import { determineNIF } from "./NodeInformationFrame.js";
 import {
 	type ControllerProprietary,
+	type ControllerProprietaryCommon,
 	getControllerProprietary,
 } from "./Proprietary.js";
 import {
@@ -707,6 +715,11 @@ export class ZWaveController
 	/** Which RF region the controller is currently set to, or `undefined` if it could not be determined (yet). This value is cached and can be changed through {@link setRFRegion}. */
 	public get rfRegion(): MaybeNotKnown<RFRegion> {
 		return this._rfRegion;
+	}
+
+	/** @internal Updates the cached RF region, e.g. from a proprietary implementation */
+	public setCachedRFRegion(region: MaybeNotKnown<RFRegion>): void {
+		this._rfRegion = region;
 	}
 
 	private _txPower: MaybeNotKnown<number>;
@@ -1086,16 +1099,19 @@ export class ZWaveController
 		this._productId = apiCaps.productId;
 		this._supportedFunctionTypes = apiCaps.supportedFunctionTypes;
 		this.driver.controllerLog.print(
-			`received API capabilities:
-  firmware version:    ${this._firmwareVersion}
-  manufacturer ID:     ${num2hex(this._manufacturerId)}
-  product type:        ${num2hex(this._productType)}
-  product ID:          ${num2hex(this._productId)}
-  supported functions: ${
-				this._supportedFunctionTypes
-					.map((fn) => `\n  · ${FunctionType[fn]} (${num2hex(fn)})`)
-					.join("")
-			}`,
+			logText("received API capabilities:", {
+				nested: logDict({
+					"firmware version": this._firmwareVersion,
+					"manufacturer ID": num2hex(this._manufacturerId),
+					"product type": num2hex(this._productType),
+					"product ID": num2hex(this._productId),
+					"supported functions": logList(
+						this._supportedFunctionTypes.map(
+							(fn) => `${FunctionType[fn]} (${num2hex(fn)})`,
+						),
+					),
+				}),
+			}),
 		);
 
 		// Request additional information about the controller/Z-Wave chip
@@ -1114,9 +1130,15 @@ export class ZWaveController
 		this._protocolVersion = version.libraryVersion;
 		this._type = version.controllerType;
 		this.driver.controllerLog.print(
-			`received version info:
-  controller type: ${getEnumMemberName(ZWaveLibraryTypes, this._type)}
-  library version: ${this._protocolVersion}`,
+			logText("received version info:", {
+				nested: logDict({
+					"controller type": getEnumMemberName(
+						ZWaveLibraryTypes,
+						this._type,
+					),
+					"library version": this._protocolVersion,
+				}),
+			}),
 		);
 
 		// If supported, get more fine-grained version info
@@ -1132,24 +1154,22 @@ export class ZWaveController
 
 			this._protocolVersion = protocol.protocolVersion;
 
-			let message = `received protocol version info:
-  protocol type:             ${
-				getEnumMemberName(
-					ProtocolType,
-					protocol.protocolType,
-				)
-			}
-  protocol version:          ${protocol.protocolVersion}`;
-			if (protocol.applicationFrameworkBuildNumber) {
-				message += `
-  appl. framework build no.: ${protocol.applicationFrameworkBuildNumber}`;
-			}
-			if (protocol.gitCommitHash) {
-				message += `
-  git commit hash:           ${protocol.gitCommitHash}`;
-			}
-
-			this.driver.controllerLog.print(message);
+			this.driver.controllerLog.print(
+				logText("received protocol version info:", {
+					nested: logDict({
+						"protocol type": getEnumMemberName(
+							ProtocolType,
+							protocol.protocolType,
+						),
+						"protocol version": protocol.protocolVersion,
+						"appl. framework build no.":
+							protocol.applicationFrameworkBuildNumber
+							|| undefined,
+						"git commit hash": protocol.gitCommitHash
+							|| undefined,
+					}),
+				}),
+			);
 		}
 
 		// The SDK version cannot be queried directly, but we can deduce it from the protocol version
@@ -1171,19 +1191,17 @@ export class ZWaveController
 			);
 			this._supportedSerialAPISetupCommands = setupCaps.supportedCommands;
 			this.driver.controllerLog.print(
-				`supported serial API setup commands:${
-					this._supportedSerialAPISetupCommands
-						.map(
+				logText("supported serial API setup commands:", {
+					nested: logList(
+						this._supportedSerialAPISetupCommands.map(
 							(cmd) =>
-								`\n· ${
-									getEnumMemberName(
-										SerialAPISetupCommand,
-										cmd,
-									)
-								}`,
-						)
-						.join("")
-				}`,
+								getEnumMemberName(
+									SerialAPISetupCommand,
+									cmd,
+								),
+						),
+					),
+				}),
 			);
 		} else {
 			this._supportedSerialAPISetupCommands = [];
@@ -1210,16 +1228,15 @@ export class ZWaveController
 		}
 
 		this.driver.controllerLog.print(
-			`supported Z-Wave features: ${
-				Object.keys(ZWaveFeature)
-					.filter((k) => /^\d+$/.test(k))
-					.map((k) => parseInt(k) as ZWaveFeature)
-					.filter((feat) => this.supportsFeature(feat))
-					.map((feat) =>
-						`\n  · ${getEnumMemberName(ZWaveFeature, feat)}`
-					)
-					.join("")
-			}`,
+			logText("supported Z-Wave features:", {
+				nested: logList(
+					Object.keys(ZWaveFeature)
+						.filter((k) => /^\d+$/.test(k))
+						.map((k) => parseInt(k) as ZWaveFeature)
+						.filter((feat) => this.supportsFeature(feat))
+						.map((feat) => getEnumMemberName(ZWaveFeature, feat)),
+				),
+			}),
 		);
 
 		return {
@@ -1251,9 +1268,12 @@ export class ZWaveController
 		}
 
 		this.driver.controllerLog.print(
-			`received Z-Wave Long Range capabilities:
-  max. payload size: ${this._maxPayloadSizeLR} bytes
-  nodes:             ${lrNodeIds.join(", ")}`,
+			logText("received Z-Wave Long Range capabilities:", {
+				nested: logDict({
+					"max. payload size": `${this._maxPayloadSizeLR} bytes`,
+					nodes: lrNodeIds.join(", "),
+				}),
+			}),
 		);
 
 		return {
@@ -1347,30 +1367,32 @@ export class ZWaveController
 			}
 
 			this.driver.controllerLog.print(
-				`supported regions:${
-					[...this._supportedRegions.values()]
-						.map((info) => {
-							let ret = `\n· ${
-								getEnumMemberName(RFRegion, info.region)
-							}`;
-							if (info.includesRegion != undefined) {
-								ret += ` · superset of ${
-									getEnumMemberName(
-										RFRegion,
-										info.includesRegion,
-									)
-								}`;
-							}
-							if (info.supportsLongRange) {
-								ret += " · ZWLR";
-								if (!info.supportsZWave) {
-									ret += " only";
+				logText("supported regions:", {
+					nested: logList(
+						[...this._supportedRegions.values()]
+							.map((info) => {
+								let ret = getEnumMemberName(
+									RFRegion,
+									info.region,
+								);
+								if (info.includesRegion != undefined) {
+									ret += ` · superset of ${
+										getEnumMemberName(
+											RFRegion,
+											info.includesRegion,
+										)
+									}`;
 								}
-							}
-							return ret;
-						})
-						.join("")
-				}`,
+								if (info.supportsLongRange) {
+									ret += " · ZWLR";
+									if (!info.supportsZWave) {
+										ret += " only";
+									}
+								}
+								return ret;
+							}),
+					),
+				}),
 			);
 		}
 
@@ -1584,14 +1606,21 @@ export class ZWaveController
 			);
 			if (resp != undefined) {
 				this.driver.controllerLog.print(
-					`received Z-Wave Long Range channel information:
-  channel:                         ${
-						resp.channel != undefined
-							? getEnumMemberName(LongRangeChannel, resp.channel)
-							: "(unknown)"
-					}
-  supports auto channel selection: ${resp.supportsAutoChannelSelection}
-`,
+					logText(
+						"received Z-Wave Long Range channel information:",
+						{
+							nested: logDict({
+								channel: resp.channel != undefined
+									? getEnumMemberName(
+										LongRangeChannel,
+										resp.channel,
+									)
+									: "(unknown)",
+								"supports auto channel selection":
+									resp.supportsAutoChannelSelection,
+							}),
+						},
+					),
 				);
 			} else {
 				this.driver.controllerLog.print(
@@ -1665,9 +1694,12 @@ export class ZWaveController
 		this._homeId = ids.homeId;
 		this._ownNodeId = ids.ownNodeId;
 		this.driver.controllerLog.print(
-			`received controller IDs:
-  home ID:     ${num2hex(this._homeId)}
-  own node ID: ${this._ownNodeId}`,
+			logText("received controller IDs:", {
+				nested: logDict({
+					"home ID": num2hex(this._homeId),
+					"own node ID": this._ownNodeId,
+				}),
+			}),
 		);
 	}
 
@@ -1675,7 +1707,9 @@ export class ZWaveController
 	 * @internal
 	 * Performs additional controller configuration
 	 */
-	public async configure(): Promise<void> {
+	public async configure(
+		knownNodeIds: readonly number[],
+	): Promise<void> {
 		// Enable TX status report if supported
 		if (
 			this.isSerialAPISetupCommandSupported(
@@ -1704,10 +1738,17 @@ export class ZWaveController
 			{ supportCheck: false },
 		);
 		this._sucNodeId = suc.sucNodeId;
+		const sucNodeMissing = this._sucNodeId !== 0
+			&& this._sucNodeId !== this._ownNodeId
+			&& !knownNodeIds.includes(this._sucNodeId);
 		if (this._sucNodeId === 0) {
 			this.driver.controllerLog.print(`No SUC present in the network`);
 		} else if (this._sucNodeId === this._ownNodeId) {
 			this.driver.controllerLog.print(`This is the SUC`);
+		} else if (sucNodeMissing) {
+			this.driver.controllerLog.print(
+				`SUC node ID ${this.sucNodeId} is not part of the network`,
+			);
 		} else {
 			this.driver.controllerLog.print(
 				`SUC has node ID ${this.sucNodeId}`,
@@ -1715,13 +1756,18 @@ export class ZWaveController
 		}
 
 		// There needs to be a SUC/SIS in the network. If not, we promote ourselves to one if the following conditions are met:
-		// We are the primary controller, but we are not SUC, there is no SUC and there is no SIS, and there are no nodes in the network yet
+		// We are the primary controller, but we are not SUC, there is no SUC and there is no SIS, and there are no nodes in the network yet -
+		// OR the configured SUC node ID is not actually part of the network (this is an edge case observed on some controllers
+		// which prevents that controller from entering inclusion mode).
 		if (
 			this.role === ControllerRole.Primary
-			&& this._noNodesIncluded
-			&& this._sucNodeId === 0
 			&& !this._isSUC
-			&& !this._isSISPresent
+			&& (
+				(this._noNodesIncluded
+					&& this._sucNodeId === 0
+					&& !this._isSISPresent)
+				|| sucNodeMissing
+			)
 		) {
 			this.driver.controllerLog.print(
 				`There is no SUC/SIS in the network - promoting ourselves...`,
@@ -1775,9 +1821,18 @@ export class ZWaveController
 
 	/** @internal */
 	public async interviewProprietary(): Promise<void> {
-		for (const impl of Object.values(this.proprietary)) {
-			if (typeof impl.interview === "function") {
+		for (const [name, impl] of Object.entries(this.proprietary)) {
+			if (typeof impl.interview !== "function") continue;
+			// A misbehaving proprietary controller must not abort the interview
+			try {
 				await impl.interview();
+			} catch (e) {
+				this.driver.controllerLog.print(
+					`Interviewing the ${name} proprietary implementation failed: ${
+						getErrorMessage(e)
+					}`,
+					"warn",
+				);
 			}
 		}
 	}
@@ -2540,29 +2595,30 @@ export class ZWaveController
 		});
 
 		this.driver.controllerLog.print(
-			`finished adding node ${newNode.id}:${
-				newNode.deviceClass
-					? `
-  basic device class:    ${
-						getEnumMemberName(
+			logText(`finished adding node ${newNode.id}:`, {
+				nested: logDict({
+					"basic device class": newNode.deviceClass
+						? getEnumMemberName(
 							BasicDeviceClass,
 							newNode.deviceClass.basic,
 						)
-					}
-  generic device class:  ${newNode.deviceClass.generic.label}
-  specific device class: ${newNode.deviceClass.specific.label}`
-					: ""
-			}
-  supported CCs: ${
-				supportedCCs
-					.map((cc) => `\n  · ${CommandClasses[cc]} (${num2hex(cc)})`)
-					.join("")
-			}
-  controlled CCs: ${
-				controlledCCs
-					.map((cc) => `\n  · ${CommandClasses[cc]} (${num2hex(cc)})`)
-					.join("")
-			}`,
+						: undefined,
+					"generic device class": newNode.deviceClass
+						?.generic.label,
+					"specific device class": newNode.deviceClass
+						?.specific.label,
+					"supported CCs": logList(
+						supportedCCs.map(
+							(cc) => `${CommandClasses[cc]} (${num2hex(cc)})`,
+						),
+					),
+					"controlled CCs": logList(
+						controlledCCs.map(
+							(cc) => `${CommandClasses[cc]} (${num2hex(cc)})`,
+						),
+					),
+				}),
+			}),
 		);
 		// remember the node
 		this._nodes.set(newNode.id, newNode);
@@ -3736,13 +3792,21 @@ export class ZWaveController
 			);
 			if (missingKeys.length > 0) {
 				this.driver.controllerLog.print(
-					`Ignoring inclusion request because the following security classes were granted but have no key configured:${
-						missingKeys.map((sc) =>
-							`\n· ${getEnumMemberName(SecurityClass, sc)}${
-								isLongRange ? " (Long Range)" : ""
-							}`
-						).join("")
-					}`,
+					logText(
+						"Ignoring inclusion request because the following security classes were granted but have no key configured:",
+						{
+							nested: logList(
+								missingKeys.map((sc) =>
+									`${
+										getEnumMemberName(
+											SecurityClass,
+											sc,
+										)
+									}${isLongRange ? " (Long Range)" : ""}`
+								),
+							),
+						},
+					),
 					"error",
 				);
 				return;
@@ -3830,26 +3894,31 @@ export class ZWaveController
 			});
 
 			this.driver.controllerLog.print(
-				`Node ${newNode.id} was included by another controller:${
-					newNode.deviceClass
-						? `
-  basic device class:    ${
-							getEnumMemberName(
-								BasicDeviceClass,
-								newNode.deviceClass.basic,
-							)
-						}
-  generic device class:  ${newNode.deviceClass.generic.label}
-  specific device class: ${newNode.deviceClass.specific.label}`
-						: ""
-				}
-  supported CCs: ${
-					nodeInfo.supportedCCs
-						.map((cc) =>
-							`\n  · ${CommandClasses[cc]} (${num2hex(cc)})`
-						)
-						.join("")
-				}`,
+				logText(
+					`Node ${newNode.id} was included by another controller:`,
+					{
+						nested: logDict({
+							"basic device class": newNode.deviceClass
+								? getEnumMemberName(
+									BasicDeviceClass,
+									newNode.deviceClass.basic,
+								)
+								: undefined,
+							"generic device class": newNode.deviceClass
+								?.generic.label,
+							"specific device class": newNode.deviceClass
+								?.specific.label,
+							"supported CCs": logList(
+								nodeInfo.supportedCCs.map(
+									(cc) =>
+										`${CommandClasses[cc]} (${
+											num2hex(cc)
+										})`,
+								),
+							),
+						}),
+					},
+				),
 			);
 
 			await this.updateProxyInclusionMachine({
@@ -4802,17 +4871,18 @@ export class ZWaveController
 			node.dsk = nodePublicKey.subarray(0, 16);
 
 			this.driver.controllerLog.logNode(node.id, {
-				message:
-					`Security S2 bootstrapping successful with these security classes:${
-						[
-							...node.securityClasses.entries(),
-						]
-							.filter(([, v]) => v)
-							.map(([k]) =>
-								`\n· ${getEnumMemberName(SecurityClass, k)}`
-							)
-							.join("")
-					}`,
+				message: logText(
+					"Security S2 bootstrapping successful with these security classes:",
+					{
+						nested: logList(
+							[...node.securityClasses.entries()]
+								.filter(([, v]) => v)
+								.map(([k]) =>
+									getEnumMemberName(SecurityClass, k)
+								),
+						),
+					},
+				),
 			});
 
 			// success 🎉
@@ -7135,6 +7205,23 @@ export class ZWaveController
 		this.emit("node added", newNode, inclusionResult);
 	}
 
+	/**
+	 * Returns the proprietary implementation that configures the RF region
+	 * through proprietary commands, but only when the given standard Serial API
+	 * Setup command is known to be unsupported. Prefer the standard command
+	 * whenever it is supported or its support is not known yet.
+	 */
+	private getProprietaryRFRegionProvider(
+		cmd: SerialAPISetupCommand,
+	): ControllerProprietaryCommon | undefined {
+		if (this.isSerialAPISetupCommandSupported(cmd) !== false) {
+			return undefined;
+		}
+		return Object.values(this.proprietary).find(
+			(impl) => typeof impl.getRFRegion === "function",
+		);
+	}
+
 	/** Configure the RF region at the Z-Wave API Module */
 	public async setRFRegion(region: RFRegion): Promise<boolean> {
 		// Setting the "default" region is not possible. Controllers are supposed to
@@ -7147,6 +7234,16 @@ export class ZWaveController
 		}
 		const prevRegion = this.rfRegion ?? RFRegion.Unknown;
 		const result = await this.setRFRegionInternal(region, true);
+
+		// Controllers using the proprietary region path have no Serial API Setup
+		// powerlevel commands, so skip the automatic powerlevel adjustments.
+		if (
+			this.getProprietaryRFRegionProvider(
+				SerialAPISetupCommand.SetRFRegion,
+			)
+		) {
+			return result;
+		}
 
 		// If automatic powerlevel adjustments are configured, do them now.
 		const isRegionActuallyDifferent = this.tryGetLRCapableRegion(prevRegion)
@@ -7167,6 +7264,18 @@ export class ZWaveController
 		region: RFRegion,
 		softReset: boolean = true,
 	): Promise<boolean> {
+		// Some controllers configure the region through proprietary commands
+		// instead of the standard Serial API Setup command.
+		const proprietary = this.getProprietaryRFRegionProvider(
+			SerialAPISetupCommand.SetRFRegion,
+		);
+		if (proprietary) {
+			// The controller restarts itself after changing the region
+			await proprietary.setRFRegion!(region);
+			this._rfRegion = region;
+			return true;
+		}
+
 		const result = await this.driver.sendMessage<
 			| SerialAPISetup_SetRFRegionResponse
 			| SerialAPISetup_CommandUnsupportedResponse
@@ -7185,6 +7294,15 @@ export class ZWaveController
 
 	/** Request the current RF region configured at the Z-Wave API Module */
 	public async getRFRegion(): Promise<RFRegion> {
+		const proprietary = this.getProprietaryRFRegionProvider(
+			SerialAPISetupCommand.GetRFRegion,
+		);
+		if (proprietary) {
+			const region = await proprietary.getRFRegion!();
+			this._rfRegion = region;
+			return region;
+		}
+
 		const result = await this.driver.sendMessage<
 			| SerialAPISetup_GetRFRegionResponse
 			| SerialAPISetup_CommandUnsupportedResponse
@@ -7826,26 +7944,31 @@ export class ZWaveController
 		);
 
 		this.driver.controllerLog.print(
-			`received additional controller information:
-  Z-Wave API version:         ${initData.zwaveApiVersion.version} (${initData.zwaveApiVersion.kind})${
-				initData.zwaveChipType
-					? `
-  Z-Wave chip type:           ${
-						typeof initData.zwaveChipType === "string"
+			logText("received additional controller information:", {
+				nested: logDict({
+					"Z-Wave API version":
+						`${initData.zwaveApiVersion.version} (${initData.zwaveApiVersion.kind})`,
+					"Z-Wave chip type": initData.zwaveChipType
+						? typeof initData.zwaveChipType === "string"
 							? initData.zwaveChipType
 							: `unknown (type: ${
 								num2hex(initData.zwaveChipType.type)
 							}, version: ${
 								num2hex(initData.zwaveChipType.version)
 							})`
-					}`
-					: ""
-			}
-  node type                   ${getEnumMemberName(NodeType, initData.nodeType)}
-  controller role:            ${initData.isPrimary ? "primary" : "secondary"}
-  controller is the SIS:      ${initData.isSIS}
-  controller supports timers: ${initData.supportsTimers}
-  Z-Wave Classic nodes:       ${initData.nodeIds.join(", ")}`,
+						: undefined,
+					"node type": getEnumMemberName(
+						NodeType,
+						initData.nodeType,
+					),
+					"controller role": initData.isPrimary
+						? "primary"
+						: "secondary",
+					"controller is the SIS": initData.isSIS,
+					"controller supports timers": initData.supportsTimers,
+					"Z-Wave Classic nodes": initData.nodeIds.join(", "),
+				}),
+			}),
 		);
 
 		const ret: SerialApiInitData = {
@@ -7899,12 +8022,19 @@ export class ZWaveController
 		this._noNodesIncluded = ret.noNodesIncluded;
 
 		this.driver.controllerLog.print(
-			`received controller capabilities:
-  controller role:      ${getEnumMemberName(ControllerRole, this.role!)}
-  is the SUC:           ${ret.isSUC}
-  started this network: ${!ret.isUsingHomeIdFromOtherNetwork}
-  SIS is present:       ${ret.isSISPresent}
-  was real primary:     ${ret.wasRealPrimary}`,
+			logText("received controller capabilities:", {
+				nested: logDict({
+					"controller role": getEnumMemberName(
+						ControllerRole,
+						this.role!,
+					),
+					"is the SUC": ret.isSUC,
+					"started this network": !ret
+						.isUsingHomeIdFromOtherNetwork,
+					"SIS is present": ret.isSISPresent,
+					"was real primary": ret.wasRealPrimary,
+				}),
+			}),
 		);
 
 		return ret;
@@ -8432,44 +8562,72 @@ export class ZWaveController
 	 * @param onProgress Can be used to monitor the progress of the operation, which may take several seconds up to a few minutes depending on the NVM size
 	 * @returns The raw NVM buffer
 	 */
-	public async backupNVMRaw(
+	public backupNVMRaw(
 		onProgress?: (bytesRead: number, total: number) => void,
 	): Promise<BytesView> {
-		this.driver.controllerLog.print("Backing up NVM...");
+		return this.driver.scheduler.queueTask(
+			this.getBackupNVMRawTask(onProgress),
+		);
+	}
 
-		// Turn Z-Wave radio off to avoid having the protocol write to the NVM while dumping it
-		if (!(await this.toggleRF(false))) {
-			throw new ZWaveError(
-				"Could not turn off the Z-Wave radio before creating NVM backup!",
-				ZWaveErrorCodes.Controller_ResponseNOK,
-			);
-		}
+	private getBackupNVMRawTask(
+		onProgress?: (bytesRead: number, total: number) => void,
+	): TaskBuilder<BytesView> {
+		const self = this;
 
-		// Disable watchdog to prevent resets during NVM access
-		await this.stopWatchdog();
+		let rfRestored = false;
 
-		let ret: BytesView;
-		try {
-			if (this.sdkVersionGte("7.0")) {
-				ret = await this.backupNVMRaw700(onProgress);
-				// All 7.xx versions so far seem to have a bug where the NVM is not properly closed after reading
-				// resulting in extremely strange controller behavior after a backup. To work around this, restart the stick if possible
-				await this.driver.trySoftReset();
-				// Soft-resetting will enable the watchdog again
-			} else {
-				ret = await this.backupNVMRaw500(onProgress);
-			}
-			this.driver.controllerLog.print("NVM backup completed");
-		} finally {
-			// Whatever happens, turn Z-Wave radio back on
-			await this.toggleRF(true);
-		}
+		return {
+			priority: TaskPriority.Normal,
+			tag: { id: "nvm-backup" },
+			group: { id: "controller-exclusive" },
+			// The radio is off during the backup, so other tasks cannot communicate anyways
+			interrupt: TaskInterruptBehavior.Forbidden,
+			task: async function* backupNVMRawTask() {
+				self.driver.controllerLog.print("Backing up NVM...");
 
-		// TODO: You can also get away with eliding all the 0xff pages. The NVR also holds the page size of the NVM (NVMP),
-		// so you can figure out which pages you don't have to save or restore. If you do this, you need to make sure to issue a
-		// "factory reset" before restoring the NVM - that'll blank out the NVM to 0xffs before initializing it.
+				// Turn Z-Wave radio off to avoid having the protocol write to the NVM while dumping it
+				if (!(yield* waitFor(self.toggleRF(false)))) {
+					throw new ZWaveError(
+						"Could not turn off the Z-Wave radio before creating NVM backup!",
+						ZWaveErrorCodes.Controller_ResponseNOK,
+					);
+				}
 
-		return ret;
+				// Disable watchdog to prevent resets during NVM access
+				yield* waitFor(self.stopWatchdog());
+
+				let ret: BytesView;
+				try {
+					if (self.sdkVersionGte("7.0")) {
+						ret = yield* waitFor(self.backupNVMRaw700(onProgress));
+						// All 7.xx versions so far seem to have a bug where the NVM is not properly closed after reading
+						// resulting in extremely strange controller behavior after a backup. To work around this, restart the stick if possible
+						yield* waitFor(self.driver.trySoftReset());
+						// Soft-resetting will enable the watchdog again
+					} else {
+						ret = yield* waitFor(self.backupNVMRaw500(onProgress));
+					}
+					self.driver.controllerLog.print("NVM backup completed");
+				} finally {
+					// Whatever happens, turn Z-Wave radio back on
+					yield* waitFor(self.toggleRF(true));
+					rfRestored = true;
+				}
+
+				// TODO: You can also get away with eliding all the 0xff pages. The NVR also holds the page size of the NVM (NVMP),
+				// so you can figure out which pages you don't have to save or restore. If you do this, you need to make sure to issue a
+				// "factory reset" before restoring the NVM - that'll blank out the NVM to 0xffs before initializing it.
+
+				return ret;
+			},
+			cleanup: async () => {
+				// Turn the radio back on when the task is dropped before it could do so itself
+				if (!rfRestored) {
+					await self.toggleRF(true);
+				}
+			},
+		};
 	}
 
 	private async backupNVMRaw500(
@@ -8596,85 +8754,139 @@ export class ZWaveController
 	 * @param restoreProgress Can be used to monitor the progress of the restore operation, which may take several seconds up to a few minutes depending on the NVM size
 	 * @param migrateOptions Influence which data should be preserved during a migration
 	 */
-	public async restoreNVM(
+	public restoreNVM(
 		nvmData: BytesView,
 		convertProgress?: (bytesRead: number, total: number) => void,
 		restoreProgress?: (bytesWritten: number, total: number) => void,
 		migrateOptions?: MigrateNVMOptions,
 	): Promise<void> {
-		// Turn Z-Wave radio off to avoid having the protocol write to the NVM while dumping it
-		if (!(await this.toggleRF(false))) {
-			throw new ZWaveError(
-				"Could not turn off the Z-Wave radio before restoring NVM backup!",
-				ZWaveErrorCodes.Controller_ResponseNOK,
-			);
-		}
-
-		// Disable watchdog to prevent resets during NVM access
-		await this.stopWatchdog();
-
-		// Restoring a potentially incompatible NVM happens in three steps:
-		// 1. the current NVM is read
-		// 2. the given NVM data is converted to match the current format
-		// 3. the converted data is written to the NVM
-
-		this.driver.controllerLog.print(
-			"Converting NVM to target format...",
-		);
-		let targetNVM: BytesView;
-		let convertedNVM: BytesView;
-		try {
-			if (this.sdkVersionGte("7.0")) {
-				targetNVM = await this.backupNVMRaw700(convertProgress);
-			} else {
-				targetNVM = await this.backupNVMRaw500(convertProgress);
-			}
-
-			convertedNVM = await migrateNVM(
+		return this.driver.scheduler.queueTask(
+			this.getRestoreNVMTask(
 				nvmData,
-				targetNVM,
+				convertProgress,
+				restoreProgress,
 				migrateOptions,
-			);
-		} catch (e) {
-			// If the process fails, at least turn the Z-Wave radio back on
-			await this.toggleRF(true);
+			),
+		);
+	}
 
-			// And re-throw the error with a more descriptive message
-			const message = "Failed to convert NVM to target format: "
-				+ (e as Error).message;
-			this.driver.controllerLog.print(message, "error");
-			(e as Error).message = message;
-			throw e;
-		}
+	private getRestoreNVMTask(
+		nvmData: BytesView,
+		convertProgress?: (bytesRead: number, total: number) => void,
+		restoreProgress?: (bytesWritten: number, total: number) => void,
+		migrateOptions?: MigrateNVMOptions,
+	): TaskBuilder<void> {
+		const self = this;
 
-		try {
-			this.driver.controllerLog.print("Restoring NVM backup...");
-			if (this.sdkVersionGte("7.0")) {
-				await this.restoreNVMRaw700(convertedNVM, restoreProgress);
-			} else {
-				await this.restoreNVMRaw500(convertedNVM, restoreProgress);
-			}
-			this.driver.controllerLog.print(
-				"NVM backup restored. Restarting to activate the restored backup...",
-			);
-		} catch (e) {
-			// If the process fails, at least turn the Z-Wave radio back on
-			await this.toggleRF(true);
+		let rfRestored = false;
 
-			// And re-throw the error with a more descriptive message
-			const message = "Failed to restore NVM backup: "
-				+ (e as Error).message;
-			this.driver.controllerLog.print(message, "error");
-			(e as Error).message = message;
-			throw e;
-		}
+		return {
+			priority: TaskPriority.Normal,
+			tag: { id: "nvm-restore" },
+			group: { id: "controller-exclusive" },
+			// The radio is off during the restore, so other tasks cannot communicate anyways
+			interrupt: TaskInterruptBehavior.Forbidden,
+			task: async function* restoreNVMTask() {
+				// Turn Z-Wave radio off to avoid having the protocol write to the NVM while dumping it
+				if (!(yield* waitFor(self.toggleRF(false)))) {
+					throw new ZWaveError(
+						"Could not turn off the Z-Wave radio before restoring NVM backup!",
+						ZWaveErrorCodes.Controller_ResponseNOK,
+					);
+				}
 
-		// After restoring an NVM backup, the controller's capabilities may have changed.
-		// Also, we could be talking to different nodes than the cache file contains.
-		// Reset all info about all nodes, so they get re-interviewed.
-		this._nodes.clear();
+				// Disable watchdog to prevent resets during NVM access
+				yield* waitFor(self.stopWatchdog());
 
-		await this.driver.softResetAndRestart();
+				// Restoring a potentially incompatible NVM happens in three steps:
+				// 1. the current NVM is read
+				// 2. the given NVM data is converted to match the current format
+				// 3. the converted data is written to the NVM
+
+				self.driver.controllerLog.print(
+					"Converting NVM to target format...",
+				);
+				let targetNVM: BytesView;
+				let convertedNVM: BytesView;
+				try {
+					if (self.sdkVersionGte("7.0")) {
+						targetNVM = yield* waitFor(
+							self.backupNVMRaw700(convertProgress),
+						);
+					} else {
+						targetNVM = yield* waitFor(
+							self.backupNVMRaw500(convertProgress),
+						);
+					}
+
+					convertedNVM = yield* waitFor(migrateNVM(
+						nvmData,
+						targetNVM,
+						migrateOptions,
+					));
+				} catch (e) {
+					// If the process fails, at least turn the Z-Wave radio back on
+					yield* waitFor(self.toggleRF(true));
+					rfRestored = true;
+
+					// And re-throw the error with a more descriptive message
+					const message = "Failed to convert NVM to target format: "
+						+ (e as Error).message;
+					self.driver.controllerLog.print(message, "error");
+					(e as Error).message = message;
+					throw e;
+				}
+
+				try {
+					self.driver.controllerLog.print("Restoring NVM backup...");
+					if (self.sdkVersionGte("7.0")) {
+						yield* waitFor(
+							self.restoreNVMRaw700(
+								convertedNVM,
+								restoreProgress,
+							),
+						);
+					} else {
+						yield* waitFor(
+							self.restoreNVMRaw500(
+								convertedNVM,
+								restoreProgress,
+							),
+						);
+					}
+					self.driver.controllerLog.print(
+						"NVM backup restored. Restarting to activate the restored backup...",
+					);
+				} catch (e) {
+					// If the process fails, at least turn the Z-Wave radio back on
+					yield* waitFor(self.toggleRF(true));
+					rfRestored = true;
+
+					// And re-throw the error with a more descriptive message
+					const message = "Failed to restore NVM backup: "
+						+ (e as Error).message;
+					self.driver.controllerLog.print(message, "error");
+					(e as Error).message = message;
+					throw e;
+				}
+
+				// The soft reset that follows a successful restore re-enables the radio
+				rfRestored = true;
+
+				// After restoring an NVM backup, the controller's capabilities may have changed.
+				// Also, we could be talking to different nodes than the cache file contains.
+				// Reset all info about all nodes, so they get re-interviewed.
+				self._nodes.clear();
+
+				yield* waitFor(self.driver.softResetAndRestart());
+			},
+			cleanup: async () => {
+				// Turn the radio back on when the task is dropped before it could do so itself
+				if (!rfRestored) {
+					await self.toggleRF(true);
+				}
+			},
+		};
 	}
 
 	/**
@@ -8690,31 +8902,9 @@ export class ZWaveController
 		nvmData: BytesView,
 		onProgress?: (bytesWritten: number, total: number) => void,
 	): Promise<void> {
-		this.driver.controllerLog.print("Restoring NVM...");
-
-		// Turn Z-Wave radio off to avoid having the protocol write to the NVM while dumping it
-		if (!(await this.toggleRF(false))) {
-			throw new ZWaveError(
-				"Could not turn off the Z-Wave radio before restoring NVM backup!",
-				ZWaveErrorCodes.Controller_ResponseNOK,
-			);
-		}
-
-		try {
-			if (this.sdkVersionGte("7.0")) {
-				await this.restoreNVMRaw700(nvmData, onProgress);
-			} else {
-				await this.restoreNVMRaw500(nvmData, onProgress);
-			}
-			this.driver.controllerLog.print("NVM backup restored");
-		} finally {
-			// Whatever happens, turn Z-Wave radio back on
-			await this.toggleRF(true);
-		}
-
-		// TODO: You can also get away with eliding all the 0xff pages. The NVR also holds the page size of the NVM (NVMP),
-		// so you can figure out which pages you don't have to save or restore. If you do this, you need to make sure to issue a
-		// "factory reset" before restoring the NVM - that'll blank out the NVM to 0xffs before initializing it.
+		await this.driver.scheduler.queueTask(
+			this.getRestoreNVMRawTask(nvmData, onProgress),
+		);
 
 		// After a restored NVM backup, the controller's capabilities may have changed.
 		// Normally we'd only need to soft reset the stick, but we also need to re-interview the controller and potentially all nodes.
@@ -8744,6 +8934,61 @@ export class ZWaveController
 			),
 		);
 		await this.driver.destroy();
+	}
+
+	private getRestoreNVMRawTask(
+		nvmData: BytesView,
+		onProgress?: (bytesWritten: number, total: number) => void,
+	): TaskBuilder<void> {
+		const self = this;
+
+		let rfRestored = false;
+
+		return {
+			priority: TaskPriority.Normal,
+			tag: { id: "nvm-restore" },
+			group: { id: "controller-exclusive" },
+			// The radio is off during the restore, so other tasks cannot communicate anyways
+			interrupt: TaskInterruptBehavior.Forbidden,
+			task: async function* restoreNVMRawTask() {
+				self.driver.controllerLog.print("Restoring NVM...");
+
+				// Turn Z-Wave radio off to avoid having the protocol write to the NVM while dumping it
+				if (!(yield* waitFor(self.toggleRF(false)))) {
+					throw new ZWaveError(
+						"Could not turn off the Z-Wave radio before restoring NVM backup!",
+						ZWaveErrorCodes.Controller_ResponseNOK,
+					);
+				}
+
+				try {
+					if (self.sdkVersionGte("7.0")) {
+						yield* waitFor(
+							self.restoreNVMRaw700(nvmData, onProgress),
+						);
+					} else {
+						yield* waitFor(
+							self.restoreNVMRaw500(nvmData, onProgress),
+						);
+					}
+					self.driver.controllerLog.print("NVM backup restored");
+				} finally {
+					// Whatever happens, turn Z-Wave radio back on
+					yield* waitFor(self.toggleRF(true));
+					rfRestored = true;
+				}
+
+				// TODO: You can also get away with eliding all the 0xff pages. The NVR also holds the page size of the NVM (NVMP),
+				// so you can figure out which pages you don't have to save or restore. If you do this, you need to make sure to issue a
+				// "factory reset" before restoring the NVM - that'll blank out the NVM to 0xffs before initializing it.
+			},
+			cleanup: async () => {
+				// Turn the radio back on when the task is dropped before it could do so itself
+				if (!rfRestored) {
+					await self.toggleRF(true);
+				}
+			},
+		};
 	}
 
 	private async restoreNVMRaw500(
@@ -9254,14 +9499,18 @@ export class ZWaveController
 		const firmwares: Firmware[] = [];
 		for (let i = 0; i < files.length; i++) {
 			const update = files[i];
-			let logMessage =
+			const logMessage =
 				`Downloading firmware update ${i} of ${files.length}...`;
-			if (loglevel === "silly") {
-				logMessage += `
-  URL:       ${update.url}
-  integrity: ${update.integrity}`;
-			}
-			this.driver.controllerLog.logNode(nodeId, logMessage);
+			this.driver.controllerLog.logNode(nodeId, {
+				message: loglevel === "silly"
+					? logText(logMessage, {
+						nested: logDict({
+							URL: update.url,
+							integrity: update.integrity,
+						}),
+					})
+					: logMessage,
+			});
 
 			try {
 				const firmware = await downloadFirmwareUpdate(update);
@@ -10156,16 +10405,18 @@ export class ZWaveController
 			}
 
 			this.driver.driverLog.print(
-				`Security S2 bootstrapping successful with these security classes:${
-					[
-						...bootstrappingNode.securityClasses.entries(),
-					]
-						.filter(([, v]) => v)
-						.map(([k]) =>
-							`\n· ${getEnumMemberName(SecurityClass, k)}`
-						)
-						.join("")
-				}`,
+				logText(
+					"Security S2 bootstrapping successful with these security classes:",
+					{
+						nested: logList(
+							[...bootstrappingNode.securityClasses.entries()]
+								.filter(([, v]) => v)
+								.map(([k]) =>
+									getEnumMemberName(SecurityClass, k)
+								),
+						),
+					},
+				),
 			);
 
 			// success 🎉
@@ -10333,15 +10584,25 @@ export class ZWaveController
 
 				if (grant) {
 					this.driver.controllerLog.logNode(nodeId, {
-						message:
-							`Received S2 bootstrap initiation, requesting keys: ${
-								grant.securityClasses.map((sc) =>
-									`\n· ${
-										getEnumMemberName(SecurityClass, sc)
-									}\n`
-								).join("")
-							}
-  client-side auth: ${grant.clientSideAuth}`,
+						message: logText(
+							"Received S2 bootstrap initiation, requesting keys:",
+							{
+								nested: [
+									logList(
+										grant.securityClasses.map((sc) =>
+											getEnumMemberName(
+												SecurityClass,
+												sc,
+											)
+										),
+									),
+									logDict({
+										"client-side auth":
+											grant.clientSideAuth,
+									}),
+								],
+							},
+						),
 					});
 
 					const bootstrapResult = await this

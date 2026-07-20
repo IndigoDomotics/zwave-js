@@ -9,6 +9,8 @@ import {
 	ValueMetadata,
 	type WithAddress,
 	encodeBitMask,
+	logList,
+	logText,
 	parseBitMask,
 	validatePayload,
 } from "@zwave-js/core";
@@ -199,6 +201,7 @@ export class BinarySensorCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -216,17 +219,15 @@ export class BinarySensorCC extends CommandClass {
 			});
 			const supportedSensorTypes = await api.getSupportedSensorTypes();
 			if (supportedSensorTypes) {
-				const logMessage = `received supported sensor types: ${
-					supportedSensorTypes
-						.map((type) =>
-							getEnumMemberName(BinarySensorType, type)
-						)
-						.map((name) => `\n· ${name}`)
-						.join("")
-				}`;
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
-					message: logMessage,
+					message: logText("received supported sensor types:", {
+						nested: logList(
+							supportedSensorTypes.map((type) =>
+								getEnumMemberName(BinarySensorType, type)
+							),
+						),
+					}),
 					direction: "inbound",
 				});
 			} else {
@@ -240,7 +241,7 @@ export class BinarySensorCC extends CommandClass {
 			}
 		}
 
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, { tag: "interview" });
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -258,6 +259,7 @@ export class BinarySensorCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		// Query (all of) the sensor's current value(s)
@@ -388,6 +390,7 @@ export class BinarySensorCCReport extends BinarySensorCC {
 		if (raw.payload.length >= 2) {
 			type = raw.payload[1];
 		}
+		validatePayload(isEnumMember(BinarySensorType, type));
 
 		return new this({
 			nodeId: ctx.sourceNodeId,

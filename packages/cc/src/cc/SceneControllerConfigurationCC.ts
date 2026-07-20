@@ -427,6 +427,7 @@ export class SceneControllerConfigurationCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		const groupCount = SceneControllerConfigurationCC.getGroupCountCached(
@@ -457,6 +458,7 @@ dimming duration: ${group.dimmingDuration.toString()}`;
 					direction: "inbound",
 				});
 			}
+			options?.onProgress?.(groupId, groupCount);
 		}
 	}
 

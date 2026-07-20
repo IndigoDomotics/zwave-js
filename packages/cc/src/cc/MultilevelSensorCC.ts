@@ -26,6 +26,8 @@ import {
 	getSensorName,
 	getSensorScale,
 	getUnknownScale,
+	logList,
+	logText,
 	parseBitMask,
 	parseFloatWithScale,
 	timespan,
@@ -397,6 +399,7 @@ export class MultilevelSensorCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -414,11 +417,11 @@ export class MultilevelSensorCC extends CommandClass {
 			});
 			const sensorTypes = await api.getSupportedSensorTypes();
 			if (sensorTypes) {
-				const logMessage = "received supported sensor types:\n"
-					+ sensorTypes
-						.map((t) => getSensorName(t))
-						.map((name) => `· ${name}`)
-						.join("\n");
+				const logMessage = logText("received supported sensor types:", {
+					nested: logList(
+						sensorTypes.map((t) => getSensorName(t)),
+					),
+				});
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
 					message: logMessage,
@@ -436,7 +439,7 @@ export class MultilevelSensorCC extends CommandClass {
 
 			// As well as the supported scales for each sensor
 
-			for (const type of sensorTypes) {
+			for (const [i, type] of sensorTypes.entries()) {
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
 					message: `querying supported scales for ${
@@ -446,15 +449,15 @@ export class MultilevelSensorCC extends CommandClass {
 				});
 				const sensorScales = await api.getSupportedScales(type);
 				if (sensorScales) {
-					const logMessage = "received supported scales:\n"
-						+ sensorScales
-							.map(
+					const logMessage = logText("received supported scales:", {
+						nested: logList(
+							sensorScales.map(
 								(s) =>
 									(getSensorScale(type, s)
 										?? getUnknownScale(s)).label,
-							)
-							.map((name) => `· ${name}`)
-							.join("\n");
+							),
+						),
+					});
 					ctx.logNode(node.id, {
 						endpoint: this.endpointIndex,
 						message: logMessage,
@@ -469,10 +472,16 @@ export class MultilevelSensorCC extends CommandClass {
 					});
 					return;
 				}
+
+				node.reportInterviewProgress(i + 1, sensorTypes.length);
 			}
 		}
 
-		await this.refreshValues(ctx);
+		await this.refreshValues(ctx, {
+			tag: "interview",
+			onProgress: (completed, total) =>
+				node.reportInterviewProgress(completed, total),
+		});
 
 		// Remember that the interview is complete
 		this.setInterviewComplete(ctx, true);
@@ -490,6 +499,7 @@ export class MultilevelSensorCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 		const valueDB = this.getValueDB(ctx);
 
@@ -525,7 +535,7 @@ value:       ${mlsResponse.value}${
 				endpoint: this.endpointIndex,
 			}) || [];
 
-			for (const type of sensorTypes) {
+			for (const [i, type] of sensorTypes.entries()) {
 				ctx.logNode(node.id, {
 					endpoint: this.endpointIndex,
 					message: `querying ${
@@ -545,6 +555,8 @@ value:       ${mlsResponse.value}${
 						direction: "inbound",
 					});
 				}
+
+				options?.onProgress?.(i + 1, sensorTypes.length);
 			}
 		}
 	}
@@ -901,9 +913,9 @@ export class MultilevelSensorCCSupportedSensorReport
 		return {
 			...super.toLogEntry(ctx),
 			message: {
-				"supported sensor types": this.supportedSensorTypes
-					.map((t) => `\n· ${getSensorName(t)}`)
-					.join(""),
+				"supported sensor types": logList(
+					this.supportedSensorTypes.map((t) => getSensorName(t)),
+				),
 			},
 		};
 	}
@@ -970,15 +982,13 @@ export class MultilevelSensorCCSupportedScaleReport extends MultilevelSensorCC {
 			...super.toLogEntry(ctx),
 			message: {
 				"sensor type": getSensorName(this.sensorType),
-				"supported scales": this.supportedScales
-					.map(
+				"supported scales": logList(
+					this.supportedScales.map(
 						(s) =>
-							`\n· ${
-								(getSensorScale(this.sensorType, s)
-									?? getUnknownScale(s)).label
-							}`,
-					)
-					.join(""),
+							(getSensorScale(this.sensorType, s)
+								?? getUnknownScale(s)).label,
+					),
+				),
 			},
 		};
 	}

@@ -15,6 +15,7 @@ import {
 	ZWaveErrorCodes,
 	encodeBitMask,
 	enumValuesToMetadataStates,
+	logList,
 	parseBitMask,
 	supervisedCommandSucceeded,
 	validatePayload,
@@ -68,6 +69,7 @@ import type { NotificationEventPayload } from "../lib/NotificationEventPayload.j
 import { V } from "../lib/Values.js";
 import { KeypadMode, UserCodeCommand, UserIDStatus } from "../lib/_Types.js";
 import type { CCEncodingContext, CCParsingContext } from "../lib/traits.js";
+import { UserCredentialCC } from "./UserCredentialCC.js";
 
 export const UserCodeCCValues = V.defineCCValues(CommandClasses["User Code"], {
 	...V.staticProperty("supportedUsers", undefined, { internal: true }),
@@ -943,17 +945,60 @@ export class UserCodeCCAPI extends PhysicalCCAPI {
 export class UserCodeCC extends CommandClass {
 	declare ccCommand: UserCodeCommand;
 
+	public determineRequiredCCInterviews(): readonly CommandClasses[] {
+		return [
+			...super.determineRequiredCCInterviews(),
+			// CL:0083.01.21.00.2 ff: The controlling node MUST only use ONE of
+			// the User Management Command Classes to control a supporting node,
+			// and cache which User Management CC is used for each node.
+			//
+			// We determine this by interviewing U3C first, and then optionally
+			// User Code CC.
+			CommandClasses["User Credential"],
+		];
+	}
+
 	public async interview(
 		ctx: InterviewContext,
 	): Promise<void> {
 		const node = this.getNode(ctx)!;
 		const endpoint = this.getEndpoint(ctx)!;
+
+		// CL:0083.01.21.00.6: A controlling node MUST NOT control the User
+		// Code on a supporting node that otherwise supports User Credential
+		// unless no Users are currently supported on the supporting node.
+		if (endpoint.supportsCC(CommandClasses["User Credential"])) {
+			const u3cUsers = UserCredentialCC.getSupportedUsersCached(
+				ctx,
+				endpoint,
+			);
+			if (u3cUsers == undefined) {
+				ctx.logNode(node.id, {
+					endpoint: this.endpointIndex,
+					message:
+						"Cannot determine if the node uses User Credential CC for user management, skipping User Code CC interview...",
+					level: "warn",
+				});
+				return;
+			} else if (u3cUsers > 0) {
+				ctx.logNode(node.id, {
+					endpoint: this.endpointIndex,
+					message:
+						"Node uses User Credential CC for user management, skipping User Code CC interview...",
+					direction: "none",
+				});
+				this.setInterviewComplete(ctx, true);
+				return;
+			}
+		}
+
 		const api = CCAPI.create(
 			CommandClasses["User Code"],
 			ctx,
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -1005,6 +1050,8 @@ export class UserCodeCC extends CommandClass {
 			{
 				queryAllUserCodes: ctx.getInterviewOptions()?.queryAllUserCodes
 					?? false,
+				onProgress: (completed, total) =>
+					node.reportInterviewProgress(completed, total),
 			},
 		);
 
@@ -1029,12 +1076,25 @@ export class UserCodeCC extends CommandClass {
 	): Promise<void> {
 		const node = this.getNode(ctx)!;
 		const endpoint = this.getEndpoint(ctx)!;
+
+		// CL:0083.01.21.00.6: A controlling node MUST NOT control the User
+		// Code on a supporting node that otherwise supports User Credential
+		// unless no Users are currently supported on the supporting node.
+		// This includes the case where that is not determined yet:
+		if (
+			endpoint.supportsCC(CommandClasses["User Credential"])
+			&& UserCredentialCC.getSupportedUsersCached(ctx, endpoint) !== 0
+		) {
+			return;
+		}
+
 		const api = CCAPI.create(
 			CommandClasses["User Code"],
 			ctx,
 			endpoint,
 		).withOptions({
 			priority: options?.priority ?? MessagePriority.NodeQuery,
+			tag: options?.tag,
 		});
 
 		const { queryAllUserCodes = false } = options ?? {};
@@ -1127,6 +1187,7 @@ export class UserCodeCC extends CommandClass {
 						let nextUserId = 1;
 						while (nextUserId > 0 && nextUserId <= supportedUsers) {
 							const response = await api.get(nextUserId, true);
+							options?.onProgress?.(nextUserId, supportedUsers);
 							if (response) {
 								nextUserId = response.nextUserId;
 							} else {
@@ -1147,6 +1208,7 @@ export class UserCodeCC extends CommandClass {
 							userId++
 						) {
 							await api.get(userId);
+							options?.onProgress?.(userId, supportedUsers);
 						}
 					}
 				}
@@ -1170,6 +1232,7 @@ export class UserCodeCC extends CommandClass {
 				});
 				for (let userId = 1; userId <= supportedUsers; userId++) {
 					await api.get(userId);
+					options?.onProgress?.(userId, supportedUsers);
 				}
 			}
 		}
@@ -1881,15 +1944,16 @@ export class UserCodeCCCapabilitiesReport extends UserCodeCC {
 					this.supportsMultipleUserCodeReport,
 				"supports multiple codes in set":
 					this.supportsMultipleUserCodeSet,
-				"supported user id statuses": this.supportedUserIDStatuses
-					.map(
-						(status) =>
-							`\n· ${getEnumMemberName(UserIDStatus, status)}`,
-					)
-					.join(""),
-				"supported keypad modes": this.supportedKeypadModes
-					.map((mode) => `\n· ${getEnumMemberName(KeypadMode, mode)}`)
-					.join(""),
+				"supported user id statuses": logList(
+					this.supportedUserIDStatuses.map((status) =>
+						getEnumMemberName(UserIDStatus, status)
+					),
+				),
+				"supported keypad modes": logList(
+					this.supportedKeypadModes.map((mode) =>
+						getEnumMemberName(KeypadMode, mode)
+					),
+				),
 				"supported ASCII chars": this.supportedASCIIChars,
 			},
 		};
@@ -2170,6 +2234,7 @@ export interface UserCodeCCExtendedUserCodeSetOptions {
 	userCodes: UserCodeCCSetOptions[];
 }
 
+// @publicAPI
 export interface UserCode {
 	userId: number;
 	userIdStatus: UserIDStatus;

@@ -44,7 +44,7 @@ import { MAX_SEND_ATTEMPTS } from "./SendDataMessages.js";
 import {
 	encodeTXReport,
 	parseTXReport,
-	txReportToMessageRecord,
+	txReportToLogDict,
 } from "./SendDataShared.js";
 
 @messageTypes(MessageType.Request, FunctionType.SendDataBridge)
@@ -226,8 +226,10 @@ export class SendDataBridgeRequest<CCType extends CommandClass = CommandClass>
 
 	public expectsNodeUpdate(ctx: GetNode<NodeId & SupportsCC>): boolean {
 		return (
+			// The expected update may be handled by someone else
+			!this.ignoreNodeUpdate
 			// We can only answer this if the command is known
-			this.command != undefined
+			&& this.command != undefined
 			// Only true singlecast commands may expect a response
 			&& this.command.isSinglecast()
 			// ... and only if the command expects a response
@@ -324,7 +326,7 @@ export class SendDataBridgeRequestTransmitReport
 				// Show TX report fields for OK and NoAck (NoAck still provides useful routing info)
 				...(this.txReport && (this.transmitStatus === TransmitStatus.OK
 						|| this.transmitStatus === TransmitStatus.NoAck)
-					? txReportToMessageRecord(this.txReport)
+					? txReportToLogDict(this.txReport)
 					: {}),
 			},
 		};

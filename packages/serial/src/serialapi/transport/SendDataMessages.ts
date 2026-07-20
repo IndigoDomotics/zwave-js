@@ -45,7 +45,7 @@ import {
 	encodeTXReport,
 	parseTXReport,
 	serializableTXReportToTXReport,
-	txReportToMessageRecord,
+	txReportToLogDict,
 } from "./SendDataShared.js";
 
 export const MAX_SEND_ATTEMPTS = 5;
@@ -213,8 +213,10 @@ export class SendDataRequest<CCType extends CommandClass = CommandClass>
 
 	public expectsNodeUpdate(ctx: GetNode<NodeId & SupportsCC>): boolean {
 		return (
+			// The expected update may be handled by someone else
+			!this.ignoreNodeUpdate
 			// We can only answer this if the command is known
-			this.command != undefined
+			&& this.command != undefined
 			// Only true singlecast commands may expect a response
 			&& this.command.isSinglecast()
 			// ... and only if the command expects a response
@@ -312,7 +314,7 @@ export class SendDataRequestTransmitReport extends SendDataRequestBase
 				// Show TX report fields for OK and NoAck (NoAck still provides useful routing info)
 				...(this.txReport && (this.transmitStatus === TransmitStatus.OK
 						|| this.transmitStatus === TransmitStatus.NoAck)
-					? txReportToMessageRecord(this.txReport)
+					? txReportToLogDict(this.txReport)
 					: {}),
 			},
 		};

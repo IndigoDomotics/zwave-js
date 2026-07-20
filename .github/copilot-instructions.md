@@ -2,6 +2,11 @@
 
 > **Note for AI assistants:** `CLAUDE.md` and `AGENTS.md` are symlinks pointing to this file (`.github/copilot-instructions.md`). Always edit this file directly, never the symlinks, or they will be replaced with regular files and break.
 
+## Agent skills and instructions
+
+- Canonical agent skills live in `.agents/skills/`. The entries in `.claude/skills/` are symlinks to them for Claude Code. Always edit the canonical files, never the symlinks.
+- The rules for authoring, editing and reviewing device configuration files live in `.agents/instructions/config-files.md`. Read and follow that file when working on `*.json` files in `packages/config/config/devices`.
+
 This repository holds the Z-Wave JS driver library, a TypeScript implementation of a Z-Wave controller software stack and supporting tools.
 
 ## Project structure
@@ -31,6 +36,7 @@ This repository holds the Z-Wave JS driver library, a TypeScript implementation 
 - Check configuration files for semantic errors: `yarn lint:zwave`
 - Detect and fix linting issues in TypeScript code: `yarn lint:ts:fix`
 - Prefer built-in tools for finding files (e.g. `Grep`) over shell commands like `find`, `ls`, `grep`, `xargs`, to ensure cross-platform compatibility.
+- For any task that authors or reviews device configuration files, use the repository's `zwave-dev` MCP tools as the primary interface. Do not replace its template resolution and targeted diagnostics with manual `$import` tracing or repository-wide lint commands.
 
 ## Common Guidelines
 
@@ -96,4 +102,4 @@ Keep comments concise (1-3 sentences), use professional technical tone, and assu
 
 The rules to apply for reviewing pull requests depend on which files were changed:
 
-- If the PR changes device configuration files (`*.json` files in `packages/config/config/devices`), follow the [review-config-pr](prompts/review-config-pr.prompt.md) prompt to review the changes.
+- If the PR changes device configuration files (`*.json` files in `packages/config/config/devices`), follow the instructions in [.agents/skills/review-config-pr/SKILL.md](../.agents/skills/review-config-pr/SKILL.md) to review the changes.

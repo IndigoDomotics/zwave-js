@@ -24,8 +24,10 @@ import { BinarySensorCCBehaviors } from "./mockCCBehaviors/BinarySensor.js";
 import { BinarySwitchCCBehaviors } from "./mockCCBehaviors/BinarySwitch.js";
 import { ColorSwitchCCBehaviors } from "./mockCCBehaviors/ColorSwitch.js";
 import { ConfigurationCCBehaviors } from "./mockCCBehaviors/Configuration.js";
+import { DoorLockCCBehaviors } from "./mockCCBehaviors/DoorLock.js";
 import { EnergyProductionCCBehaviors } from "./mockCCBehaviors/EnergyProduction.js";
 import { IndicatorCCBehaviors } from "./mockCCBehaviors/Indicator.js";
+import { LockCCBehaviors } from "./mockCCBehaviors/Lock.js";
 import { ManufacturerSpecificCCBehaviors } from "./mockCCBehaviors/ManufacturerSpecific.js";
 import { MeterCCBehaviors } from "./mockCCBehaviors/Meter.js";
 import {
@@ -70,6 +72,12 @@ const respondToRequestNodeInfo: MockNodeBehavior = {
 					.filter(([, info]) => info.isSupported)
 					// FIXME: Filter out secure CCs if the node isn't secure
 					.map(([ccId]) => ccId),
+				controlledCCs: [...self.implementedCCs]
+					// Basic CC must not be included in the NIF
+					.filter(([ccId]) => ccId !== CommandClasses.Basic)
+					// Only include controlled CCs
+					.filter(([, info]) => info.isControlled)
+					.map(([ccId]) => ccId),
 			});
 			return { action: "sendCC", cc };
 		}
@@ -106,13 +114,6 @@ const respondToVersionCCCommandClassGet: MockNodeBehavior = {
 					version = info.version;
 					break;
 				}
-			}
-
-			// Basic CC is always supported implicitly
-			if (
-				version === 0 && receivedCC.requestedCC === CommandClasses.Basic
-			) {
-				version = 1;
 			}
 
 			const cc = new VersionCCCommandClassReport({
@@ -214,7 +215,9 @@ export function createDefaultBehaviors(): MockNodeBehavior[] {
 		...BinarySwitchCCBehaviors,
 		...ColorSwitchCCBehaviors,
 		...ConfigurationCCBehaviors,
+		...DoorLockCCBehaviors,
 		...EnergyProductionCCBehaviors,
+		...LockCCBehaviors,
 		...IndicatorCCBehaviors,
 		...ManufacturerSpecificCCBehaviors,
 		...MeterCCBehaviors,

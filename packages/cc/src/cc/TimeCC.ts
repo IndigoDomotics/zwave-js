@@ -198,6 +198,7 @@ export class TimeCC extends CommandClass {
 			endpoint,
 		).withOptions({
 			priority: MessagePriority.NodeQuery,
+			tag: "interview",
 		});
 
 		ctx.logNode(node.id, {
@@ -316,6 +317,13 @@ export class TimeCCDateReport extends TimeCC {
 		const year = raw.payload.readUInt16BE(0);
 		const month = raw.payload[2];
 		const day = raw.payload[3];
+
+		validatePayload(
+			month >= 1,
+			month <= 12,
+			day >= 1,
+			day <= 31,
+		);
 
 		return new this({
 			nodeId: ctx.sourceNodeId,
