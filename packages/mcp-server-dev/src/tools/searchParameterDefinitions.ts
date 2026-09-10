@@ -1,6 +1,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+
 import type { SemanticSearchService } from "../semantic/service.js";
 import type { ToolHandler } from "../types.js";
+
 import { clampLimit, invalidArgument, jsonResult } from "./results.js";
 import { handleSemanticError } from "./semanticErrors.js";
 
@@ -41,9 +43,9 @@ export function createSearchParameterDefinitionsTool(
 			&& kind !== "both"
 		) {
 			return invalidArgument(
-				`kind must be one of "parameter", "template", "both" (got "${
-					String(kind)
-				}")`,
+				`kind must be one of "parameter", "template", "both" (got "${String(
+					kind,
+				)}")`,
 			);
 		}
 
@@ -75,6 +77,12 @@ export function createSearchParameterDefinitionsTool(
 			+ "templates are returned separately. Uses the bundled local embedding "
 			+ "model; if it needs a one-time download, the response may report "
 			+ "model_download_consent_required instead of results.",
+		annotations: {
+			readOnlyHint: true,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: true,
+		},
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -82,7 +90,7 @@ export function createSearchParameterDefinitionsTool(
 					type: "string",
 					description:
 						"Free-text description of the parameter/template to find, "
-						+ "e.g. \"dimming ramp rate manual control\"",
+						+ 'e.g. "dimming ramp rate manual control"',
 				},
 				manufacturer: {
 					type: "string",
@@ -94,7 +102,7 @@ export function createSearchParameterDefinitionsTool(
 					type: "string",
 					description:
 						"Optional filter: only consider entries with this exact "
-						+ "$purpose tag, e.g. \"reporting_interval.temperature\"",
+						+ '$purpose tag, e.g. "reporting_interval.temperature"',
 				},
 				kind: {
 					type: "string",

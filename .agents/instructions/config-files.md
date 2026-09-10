@@ -120,11 +120,7 @@ When authoring and reviewing configuration files, consistency is key for maintai
   - If description states available options, convert those to the `options` field
   - If description states min/max values, convert those to `minValue`/`maxValue` fields
   - If description explains the parameter unit, convert to the `unit` field
-- **Exception 1**: When parameter has gaps in valid ranges (e.g., 0-99 plus 255), explain the allowable range. This includes cases with a single option outside of the allowable range.
-  - Examples:
-    - `"description": "Allowable range: 0-99, 255"`
-    - `"description": "Allowable range: 30-1000"` plus an option for 0 (Disabled)
-- **Exception 2**: When units change based on parameter value, describe this in the description
+- **Exception**: When units change based on parameter value, describe this in the description
   - Examples:
     - `"description": "Values 1-127 = seconds; 128-255 = minutes (minus 127)"`
     - `"description": "0 = disabled, 1 to 60 = seconds, 61 to 120 = minutes (minus 60), 121 - 254 = hours (minus 120), 255 = indefinitely"`
@@ -142,6 +138,8 @@ When authoring and reviewing configuration files, consistency is key for maintai
 ### Parameter Values and Ranges
 
 - Define `minValue`/`maxValue` only as large as necessary
+- Use `allowed` when the valid values contain gaps. Combine individual values and ranges as needed (e.g., `"allowed": [{ "value": 0 }, { "range": [30, 2678400] }]`)
+- Do not duplicate values represented by `allowed` in the description
 - Check device manual for actual valid ranges, don't default to 0-255
 - Use `unsigned: true` for parameters interpreted as unsigned values
 - Mark parameters as `readOnly` or `writeOnly` when applicable
@@ -215,6 +213,39 @@ Becomes four partial parameters:
 - When adding a new device, defining associations in the config file is rarely necessary
 - All devices have a group for communication with the controller - this should be labeled "Lifeline"
 - Modern devices typically use Association group 1 as the lifeline, but older devices may use different numbers
+
+## Endpoint Labels
+
+The `endpoints` property (property order slot 8) can carry a `label` string for each Multi Channel endpoint, giving it a concise human-readable name ("Relay 1", "Floor Sensor"). These labels help home automation UIs display meaningful names instead of bare endpoint indices.
+
+### When to Add Endpoint Labels
+
+Only add a label when the device manual or manufacturer's product page **explicitly describes what that endpoint controls**. Never derive a label solely from the endpoint's device class or invent one. If an endpoint's purpose is undocumented, leave it unlabeled.
+
+### Label Style
+
+- Apply Title Case ("Circuit 1", "USB Port")
+- Keep labels short — 1–3 words is typical
+- Omit redundant words like "channel" or "endpoint" unless they are part of the documented name
+- When multiple endpoints share an undifferentiated type, disambiguate with an index that matches the documentation ("Relay 1", "Relay 2")
+- Do not label root endpoint `"0"` unless the documentation gives it a name distinct from the device itself
+- **Describe the device part, not the abstract feature** — prefer "Temperature Sensor" over "Temperature", "Motion Sensor" over "Motion". Naming the physical part is more concrete and more understandable to users who know what device they have.
+- **Normalize cryptic manufacturer-internal names** when normalization removes no information about what the endpoint does. A name is cryptic if a typical user would not understand it without consulting the manual — e.g. `SIG1` says nothing more than "Input 1", so normalize it: `SIG1` → `Input 1`. Apply the same logic to unexplained abbreviations like `OUT1` → `Output 1`.
+- **Keep informative original names verbatim** when the documented name conveys feature context that a generic label would lose. For example, `CT1` signals a current-transformer clamp input — normalizing it to `Input 1` would drop that context. The same applies when the documented names distinguish different input types on the same device — e.g. a module with both analog and digital inputs should keep `Analog 1` and `Digital Input` rather than collapsing them to `Input 1`, `Input 2`, which would erase the type distinction. In such cases keep the documented name exactly, without expanding or rewording it.
+
+### Root Association Migration
+
+If an `endpoints` block is added to a config that already has root-level `associations`, the spec requires those associations to move under `endpoints["0"]` (using `$import` self-references to avoid duplication). This migration is non-trivial — flag such files for human review rather than auto-migrating.
+
+### Example
+
+```json
+"endpoints": {
+    "1": { "label": "Circuit 1" },
+    "2": { "label": "Circuit 2" },
+    "3": { "label": "Circuit 3" }
+}
+```
 
 ## Central Scene Labels
 
@@ -377,6 +408,7 @@ Example:
   	}
   }
   ```
+
 - All properties in `metadata` are optional.
 - Do not add metadata if there is none
 

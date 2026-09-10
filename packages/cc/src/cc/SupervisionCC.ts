@@ -23,8 +23,13 @@ import {
 	validatePayload,
 } from "@zwave-js/core";
 import { Bytes, getEnumMemberName } from "@zwave-js/shared";
+
 import { PhysicalCCAPI } from "../lib/API.js";
-import { type CCRaw, CommandClass } from "../lib/CommandClass.js";
+import {
+	type CCRaw,
+	CommandClass,
+	CommandRelation,
+} from "../lib/CommandClass.js";
 import {
 	API,
 	CCCommand,
@@ -162,8 +167,8 @@ export class SupervisionCC extends CommandClass {
 
 		// Copy the encapsulation flags from the encapsulated command
 		// but omit Supervision, since we're doing that right now
-		ret.encapsulationFlags = cc.encapsulationFlags
-			& ~EncapsulationFlags.Supervision;
+		ret.encapsulationFlags =
+			cc.encapsulationFlags & ~EncapsulationFlags.Supervision;
 
 		return ret;
 	}
@@ -221,21 +226,16 @@ export class SupervisionCC extends CommandClass {
 		ccId: CommandClasses,
 		supported: boolean,
 	): void {
-		ctx
-			.getValueDB(endpoint.nodeId)
-			.setValue(
-				SupervisionCCValues.ccSupported(ccId).endpoint(endpoint.index),
-				supported,
-			);
+		ctx.getValueDB(endpoint.nodeId).setValue(
+			SupervisionCCValues.ccSupported(ccId).endpoint(endpoint.index),
+			supported,
+		);
 	}
 
 	/** Returns whether this is a valid command to send supervised */
 	public static mayUseSupervision<T extends CommandClass>(
-		ctx:
-			& GetValueDB
-			& GetNode<
-				NodeId & SupportsCC & GetEndpoint<EndpointId>
-			>,
+		ctx: GetValueDB
+			& GetNode<NodeId & SupportsCC & GetEndpoint<EndpointId>>,
 		command: T,
 	): command is SinglecastCC<T> {
 		// Supervision may only be used for singlecast CCs that expect no response
@@ -266,30 +266,26 @@ export class SupervisionCC extends CommandClass {
 }
 
 // @publicAPI
-export type SupervisionCCReportOptions =
-	& {
-		moreUpdatesFollow: boolean;
-		requestWakeUpOnDemand?: boolean;
-		sessionId: number;
-	}
-	& (
-		| {
+export type SupervisionCCReportOptions = {
+	moreUpdatesFollow: boolean;
+	requestWakeUpOnDemand?: boolean;
+	sessionId: number;
+} & (
+	| {
 			status: SupervisionStatus.Working;
 			duration: Duration;
-		}
-		| {
+	  }
+	| {
 			status:
 				| SupervisionStatus.NoSupport
 				| SupervisionStatus.Fail
 				| SupervisionStatus.Success;
-		}
-	);
+	  }
+);
 
 @CCCommand(SupervisionCommand.Report)
 export class SupervisionCCReport extends SupervisionCC {
-	public constructor(
-		options: WithAddress<SupervisionCCReportOptions>,
-	) {
+	public constructor(options: WithAddress<SupervisionCCReportOptions>) {
 		super(options);
 
 		this.moreUpdatesFollow = options.moreUpdatesFollow;
@@ -311,7 +307,8 @@ export class SupervisionCCReport extends SupervisionCC {
 		const status: SupervisionStatus = raw.payload[1];
 
 		if (status === SupervisionStatus.Working) {
-			const duration = Duration.parseReport(raw.payload[2])
+			const duration =
+				Duration.parseReport(raw.payload[2])
 				?? new Duration(0, "seconds");
 			return new this({
 				nodeId: ctx.sourceNodeId,
@@ -342,8 +339,8 @@ export class SupervisionCCReport extends SupervisionCC {
 		this.payload = Bytes.concat([
 			[
 				(this.moreUpdatesFollow ? 0b1_0_000000 : 0)
-				| (this.requestWakeUpOnDemand ? 0b0_1_000000 : 0)
-				| (this.sessionId & 0b111111),
+					| (this.requestWakeUpOnDemand ? 0b0_1_000000 : 0)
+					| (this.sessionId & 0b111111),
 				this.status,
 			],
 		]);
@@ -403,9 +400,7 @@ function testResponseForSupervisionCCGet(
 @CCCommand(SupervisionCommand.Get)
 @expectedCCResponse(SupervisionCCReport, testResponseForSupervisionCCGet)
 export class SupervisionCCGet extends SupervisionCC {
-	public constructor(
-		options: WithAddress<SupervisionCCGetOptions>,
-	) {
+	public constructor(options: WithAddress<SupervisionCCGetOptions>) {
 		super(options);
 		this.sessionId = options.sessionId;
 		this.requestStatusUpdates = options.requestStatusUpdates;
@@ -439,12 +434,24 @@ export class SupervisionCCGet extends SupervisionCC {
 	public sessionId: number;
 	public encapsulated: CommandClass;
 
+	protected override determineRelation(other: CommandClass): CommandRelation {
+		if (
+			other instanceof SupervisionCCGet
+			// Requesting status updates changes the expected response flow,
+			// so commands with different flags must not be related
+			&& this.requestStatusUpdates === other.requestStatusUpdates
+		) {
+			return this.encapsulated.getRelationTo(other.encapsulated);
+		}
+		return CommandRelation.Unrelated;
+	}
+
 	public async serialize(ctx: CCEncodingContext): Promise<Bytes> {
 		const encapCC = await this.encapsulated.serialize(ctx);
 		this.payload = Bytes.concat([
 			[
 				(this.requestStatusUpdates ? 0b10_000000 : 0)
-				| (this.sessionId & 0b111111),
+					| (this.sessionId & 0b111111),
 				encapCC.length,
 			],
 			encapCC,

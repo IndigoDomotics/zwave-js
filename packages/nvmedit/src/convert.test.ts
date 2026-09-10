@@ -1,9 +1,11 @@
-import { fs } from "@zwave-js/core/bindings/fs/node";
-import { cloneDeep, readJSON } from "@zwave-js/shared";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { fs } from "@zwave-js/core/bindings/fs/node";
+import { cloneDeep, readJSON } from "@zwave-js/shared";
 import { type ExpectStatic, test } from "vitest";
+
 import {
 	type MigrateNVMOptions,
 	type NVMJSON,
@@ -182,16 +184,16 @@ function bufferEquals(
 			delete expected.meta;
 			if (expected.controller.applicationData) {
 				while (expected.controller.applicationData.startsWith("00")) {
-					expected.controller.applicationData = expected.controller
-						.applicationData.slice(2);
+					expected.controller.applicationData =
+						expected.controller.applicationData.slice(2);
 				}
 				while (expected.controller.applicationData.endsWith("00")) {
-					expected.controller.applicationData = expected.controller
-						.applicationData.slice(0, -2);
+					expected.controller.applicationData =
+						expected.controller.applicationData.slice(0, -2);
 				}
 				if (expected.controller.applicationData.length > 1024) {
-					expected.controller.applicationData = expected.controller
-						.applicationData.slice(0, 1024);
+					expected.controller.applicationData =
+						expected.controller.applicationData.slice(0, 1024);
 				}
 			}
 			t.expect(output).toStrictEqual(expected);
@@ -213,6 +215,63 @@ test("700 to 700 migration shortcut", async (t) => {
 	const converted = await migrateNVM(nvmSource, nvmTarget);
 
 	bufferEquals(t.expect, converted, nvmSource);
+});
+
+test("700 to 700 migration repairs the application node listening flag", async (t) => {
+	const fixturesDir = path.join(__dirname, "../test/fixtures/nvm_700_binary");
+
+	const nvmSource = await fsp.readFile(
+		path.join(fixturesDir, "ctrlr_backup_700_7.12.bin"),
+	);
+	const sourceJSON = await nvmToJSON(nvmSource);
+	sourceJSON.controller.isListening = false;
+	const sourceWithInvalidNodeInfo = await jsonToNVM(
+		sourceJSON,
+		sourceJSON.controller.applicationVersion,
+	);
+	const nvmTarget = await fsp.readFile(
+		path.join(fixturesDir, "ctrlr_backup_700_7.16_1.bin"),
+	);
+
+	const converted = await migrateNVM(sourceWithInvalidNodeInfo, nvmTarget);
+	const convertedJSON = await nvmToJSON(converted);
+
+	t.expect(convertedJSON.controller.isListening).toBe(true);
+	t.expect(
+		convertedJSON.nodes[convertedJSON.controller.nodeId].isListening,
+	).toBe(true);
+});
+
+test("500 to 700 migration repairs the application node listening flag", async (t) => {
+	const fixturesDir500 = path.join(
+		__dirname,
+		"../test/fixtures/nvm_500_binary",
+	);
+	const fixturesDir700 = path.join(
+		__dirname,
+		"../test/fixtures/nvm_700_binary",
+	);
+
+	const nvmSource = await fsp.readFile(
+		path.join(fixturesDir500, "ctrlr_backup_500_static_6.8x.bin"),
+	);
+	const sourceJSON = await nvm500ToJSON(nvmSource);
+	sourceJSON.nodes[sourceJSON.controller.nodeId || 1].isListening = false;
+	const sourceWithInvalidNodeInfo = await jsonToNVM500(
+		sourceJSON,
+		sourceJSON.controller.protocolVersion,
+	);
+	const nvmTarget = await fsp.readFile(
+		path.join(fixturesDir700, "ctrlr_backup_700_7.16_1.bin"),
+	);
+
+	const converted = await migrateNVM(sourceWithInvalidNodeInfo, nvmTarget);
+	const convertedJSON = await nvmToJSON(converted);
+
+	t.expect(convertedJSON.controller.isListening).toBe(true);
+	t.expect(
+		convertedJSON.nodes[convertedJSON.controller.nodeId].isListening,
+	).toBe(true);
 });
 
 test("strip application data during migration", async (t) => {

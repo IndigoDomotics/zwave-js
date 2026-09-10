@@ -19,6 +19,7 @@ import {
 import { FunctionType, Message, MessageType } from "@zwave-js/serial";
 import { Bytes } from "@zwave-js/shared";
 import { roundTo } from "alcalzone-shared/math";
+
 import type { Driver } from "../../driver/Driver.js";
 import type { ZWaveController } from "../Controller.js";
 import type { ControllerProprietaryCommon } from "../Proprietary.js";
@@ -35,6 +36,33 @@ export enum NabuCasaCommand {
 	SetConfig = 0x06,
 	GetLEDBinary = 0x07,
 	SetLEDBinary = 0x08,
+	GetBootloaderInfo = 0x09,
+}
+
+/**
+ * Capabilities of the Gecko Bootloader, mirroring the `BOOTLOADER_CAPABILITY_*`
+ * definitions in the Simplicity SDK. The unlisted bits are unassigned.
+ */
+export enum NabuCasaBootloaderCapability {
+	EnforceUpgradeSignature = 0,
+	EnforceUpgradeEncryption = 1,
+	EnforceSecureBoot = 2,
+	BootloaderUpgrade = 4,
+	GBL = 5,
+	GBLSignature = 6,
+	GBLEncryption = 7,
+	EnforceCertificateSecureBoot = 8,
+	RollbackProtection = 9,
+	PeripheralList = 10,
+	Storage = 16,
+	Communication = 20,
+	EM4GPIORetention = 21,
+}
+
+export interface NabuCasaBootloaderInfo {
+	/** Bootloader version, formatted as `major.minor.customer` */
+	version: string;
+	capabilities: NabuCasaBootloaderCapability[];
 }
 
 export interface RGB {
@@ -102,20 +130,15 @@ const BLACK: RGB = { r: 0, g: 2, b: 0 };
 
 function parseGyro(msg: Message): Vector {
 	// According to datasheet: 8g range => 977 µg/LSB
-	const x = roundTo(msg.payload.readInt16BE(1) / 1024 * 9.77, 2);
-	const y = roundTo(msg.payload.readInt16BE(3) / 1024 * 9.77, 2);
-	const z = roundTo(msg.payload.readInt16BE(5) / 1024 * 9.77, 2);
+	const x = roundTo((msg.payload.readInt16BE(1) / 1024) * 9.77, 2);
+	const y = roundTo((msg.payload.readInt16BE(3) / 1024) * 9.77, 2);
+	const z = roundTo((msg.payload.readInt16BE(5) / 1024) * 9.77, 2);
 
 	return { x, y, z };
 }
 
-export class ControllerProprietary_NabuCasa
-	implements ControllerProprietaryCommon
-{
-	constructor(
-		driver: Driver,
-		controller: ZWaveController,
-	) {
+export class ControllerProprietary_NabuCasa implements ControllerProprietaryCommon {
+	constructor(driver: Driver, controller: ZWaveController) {
 		this.driver = driver;
 		this.controller = controller;
 	}
@@ -123,12 +146,22 @@ export class ControllerProprietary_NabuCasa
 	private driver: Driver;
 	private controller: ZWaveController;
 	private supportedCommands?: NabuCasaCommand[];
+	private _bootloaderInfo?: NabuCasaBootloaderInfo;
+
+	/** Information about the bootloader, read during the interview */
+	public get bootloaderInfo(): NabuCasaBootloaderInfo | undefined {
+		return this._bootloaderInfo;
+	}
 
 	public async interview(): Promise<void> {
 		const valueDB = this.controller.valueDB;
 
 		const supported = await this.getSupportedCommands();
 		this.supportedCommands = supported;
+
+		if (supported.includes(NabuCasaCommand.GetBootloaderInfo)) {
+			this._bootloaderInfo ??= await this.getBootloaderInfo();
+		}
 
 		if (
 			supported.includes(NabuCasaCommand.GetLEDBinary)
@@ -145,50 +178,37 @@ export class ControllerProprietary_NabuCasa
 			);
 
 			// Clean up RGB values if they exist
-			valueDB.setMetadata(
-				ColorSwitchCCValues.currentColor.id,
-				undefined,
-			);
+			valueDB.setMetadata(ColorSwitchCCValues.currentColor.id, undefined);
 			valueDB.removeValue(ColorSwitchCCValues.currentColor.id);
 
-			valueDB.setMetadata(
-				ColorSwitchCCValues.targetColor.id,
-				undefined,
-			);
+			valueDB.setMetadata(ColorSwitchCCValues.targetColor.id, undefined);
 			valueDB.removeValue(ColorSwitchCCValues.targetColor.id);
 
-			valueDB.setMetadata(
-				ColorSwitchCCValues.hexColor.id,
-				undefined,
-			);
+			valueDB.setMetadata(ColorSwitchCCValues.hexColor.id, undefined);
 			valueDB.removeValue(ColorSwitchCCValues.hexColor.id);
 
 			valueDB.setMetadata(
-				ColorSwitchCCValues
-					.currentColorChannel(ColorComponent.Red).id,
+				ColorSwitchCCValues.currentColorChannel(ColorComponent.Red).id,
 				undefined,
 			);
 			valueDB.removeValue(
-				ColorSwitchCCValues
-					.currentColorChannel(ColorComponent.Red).id,
+				ColorSwitchCCValues.currentColorChannel(ColorComponent.Red).id,
 			);
 			valueDB.setMetadata(
-				ColorSwitchCCValues
-					.currentColorChannel(ColorComponent.Green).id,
+				ColorSwitchCCValues.currentColorChannel(ColorComponent.Green)
+					.id,
 				undefined,
 			);
 			valueDB.removeValue(
-				ColorSwitchCCValues
-					.currentColorChannel(ColorComponent.Green).id,
+				ColorSwitchCCValues.currentColorChannel(ColorComponent.Green)
+					.id,
 			);
 			valueDB.setMetadata(
-				ColorSwitchCCValues
-					.currentColorChannel(ColorComponent.Blue).id,
+				ColorSwitchCCValues.currentColorChannel(ColorComponent.Blue).id,
 				undefined,
 			);
 			valueDB.removeValue(
-				ColorSwitchCCValues
-					.currentColorChannel(ColorComponent.Blue).id,
+				ColorSwitchCCValues.currentColorChannel(ColorComponent.Blue).id,
 			);
 		}
 
@@ -209,17 +229,11 @@ export class ControllerProprietary_NabuCasa
 				configEnableTiltIndicator,
 				configEnableTiltIndicatorMeta,
 			);
-			valueDB.setValue(
-				configEnableTiltIndicator,
-				enableTiltIndicator,
-			);
+			valueDB.setValue(configEnableTiltIndicator, enableTiltIndicator);
 		}
 	}
 
-	private persistRGBValue(
-		valueDB: ValueDB,
-		rgb: RGB,
-	) {
+	private persistRGBValue(valueDB: ValueDB, rgb: RGB) {
 		// Treat any other color than black as "on"
 		valueDB.setValue(
 			BinarySwitchCCValues.currentValue.id,
@@ -231,10 +245,7 @@ export class ControllerProprietary_NabuCasa
 		);
 	}
 
-	private persistLEDState(
-		valueDB: ValueDB,
-		state: boolean,
-	) {
+	private persistLEDState(valueDB: ValueDB, state: boolean) {
 		valueDB.setValue(BinarySwitchCCValues.currentValue.id, state);
 		valueDB.setValue(BinarySwitchCCValues.targetValue.id, state);
 	}
@@ -256,13 +267,10 @@ export class ControllerProprietary_NabuCasa
 			},
 		});
 
-		const result = await this.driver.sendMessage(
-			getSupportedCmd,
-			{
-				priority: MessagePriority.Controller,
-				supportCheck: false,
-			},
-		);
+		const result = await this.driver.sendMessage(getSupportedCmd, {
+			priority: MessagePriority.Controller,
+			supportCheck: false,
+		});
 		const supported = result.payload.subarray(1);
 
 		return parseBitMask(supported, NabuCasaCommand.GetSupportedCommands);
@@ -467,10 +475,7 @@ export class ControllerProprietary_NabuCasa
 		// HOST->ZW (REQ): NABU_CASA_CONFIG_GET | key
 		// ZW->HOST (RES): NABU_CASA_CONFIG_GET | key | size | value...
 
-		const payload = Bytes.from([
-			NabuCasaCommand.GetConfig,
-			key,
-		]);
+		const payload = Bytes.from([NabuCasaCommand.GetConfig, key]);
 
 		const getConfigCmd = new Message({
 			type: MessageType.Request,
@@ -535,6 +540,55 @@ export class ControllerProprietary_NabuCasa
 		const success = !!result.payload[1];
 
 		return success;
+	}
+
+	public async getBootloaderVersion(): Promise<string | undefined> {
+		if (
+			!this.supportedCommands?.includes(NabuCasaCommand.GetBootloaderInfo)
+		) {
+			return undefined;
+		}
+
+		this._bootloaderInfo ??= await this.getBootloaderInfo();
+		return this._bootloaderInfo.version;
+	}
+
+	public async getBootloaderInfo(): Promise<NabuCasaBootloaderInfo> {
+		// HOST->ZW (REQ): NABU_CASA_BOOTLOADER_INFO
+		// ZW->HOST (RES): NABU_CASA_BOOTLOADER_INFO | major | minor | customer | capabilities[4]
+
+		const getBootloaderInfoCmd = new Message({
+			type: MessageType.Request,
+			functionType: FUNC_ID_NABUCASA,
+			payload: Bytes.from([NabuCasaCommand.GetBootloaderInfo]),
+			expectedResponse: (self, msg) => {
+				return (
+					msg.functionType === FUNC_ID_NABUCASA
+					&& msg.type === MessageType.Response
+					&& msg.payload[0] === NabuCasaCommand.GetBootloaderInfo
+				);
+			},
+		});
+
+		const { payload: result } = await this.driver.sendMessage(
+			getBootloaderInfoCmd,
+			{
+				priority: MessagePriority.Controller,
+				supportCheck: false,
+			},
+		);
+
+		// The capabilities are transferred MSB first, but parseBitMask expects
+		// the least significant byte first
+		const capabilities = result.subarray(4, 8).toReversed();
+
+		return {
+			version: `${result[1]}.${result[2]}.${result[3]}`,
+			capabilities: parseBitMask(
+				capabilities,
+				0,
+			) as NabuCasaBootloaderCapability[],
+		};
 	}
 
 	public getDefinedValueIDs(): TranslatedValueID[] {
@@ -615,14 +669,11 @@ export class ControllerProprietary_NabuCasa
 			ConfigurationCCValues.paramInformation.is(valueId)
 			&& valueId.propertyKey == undefined
 			&& typeof value === "number"
-			&& [
-				NabuCasaConfigKey.EnableTiltIndicator,
-			].includes(valueId.property as any)
+			&& [NabuCasaConfigKey.EnableTiltIndicator].includes(
+				valueId.property as any,
+			)
 		) {
-			await this.setConfig(
-				valueId.property as NabuCasaConfigKey,
-				value,
-			);
+			await this.setConfig(valueId.property as NabuCasaConfigKey, value);
 			this.controller.valueDB.setValue(valueId, value);
 
 			return { status: SetValueStatus.Success };

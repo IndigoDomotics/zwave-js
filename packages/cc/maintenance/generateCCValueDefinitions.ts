@@ -1,4 +1,6 @@
-import { formatWithDprint } from "@zwave-js/maintenance";
+import path from "node:path";
+
+import { formatWithOxfmt } from "@zwave-js/maintenance";
 import { getErrorMessage } from "@zwave-js/shared";
 import {
 	type ArrowFunction,
@@ -37,10 +39,10 @@ const ignoredImports = new Set(["V", "ValueMetadata"]);
  */
 export async function generateCCValueDefinitionsFile(
 	sourceFiles: SourceFile[],
-	_srcDir: string,
+	srcDir: string,
 ): Promise<Map<string, string>> {
 	const ccSourceFiles = sourceFiles.filter((file) =>
-		file.getBaseNameWithoutExtension().endsWith("CC")
+		file.getBaseNameWithoutExtension().endsWith("CC"),
 	);
 
 	let result = "";
@@ -48,10 +50,7 @@ export async function generateCCValueDefinitionsFile(
 	let exported = "";
 
 	// Collect imports
-	const importsByModule = new Map<
-		string,
-		Map<string, boolean>
-	>();
+	const importsByModule = new Map<string, Map<string, boolean>>();
 	// Add some default imports we always need
 	importsByModule.set(
 		"@zwave-js/core",
@@ -65,15 +64,11 @@ export async function generateCCValueDefinitionsFile(
 	);
 	importsByModule.set(
 		"@zwave-js/shared",
-		new Map([
-			["getEnumMemberName", false],
-		]),
+		new Map([["getEnumMemberName", false]]),
 	);
 	importsByModule.set(
 		"../lib/Values.js",
-		new Map([
-			["CCValueOptions", true],
-		]),
+		new Map([["CCValueOptions", true]]),
 	);
 	const allImports = new Map<string, boolean>(
 		[...importsByModule.values()].flatMap((map) => [...map.entries()]),
@@ -89,9 +84,9 @@ export async function generateCCValueDefinitionsFile(
 		// 	process.exit(1);
 		// }
 
-		const ccValuesDeclaration = file.getDescendantsOfKind(
-			SyntaxKind.VariableDeclaration,
-		).find((decl) => decl.getName().endsWith("CCValues"));
+		const ccValuesDeclaration = file
+			.getDescendantsOfKind(SyntaxKind.VariableDeclaration)
+			.find((decl) => decl.getName().endsWith("CCValues"));
 
 		if (!ccValuesDeclaration) continue;
 
@@ -101,10 +96,9 @@ export async function generateCCValueDefinitionsFile(
 		);
 		if (
 			!defineCCValuesCall
-			|| defineCCValuesCall.getExpressionIfKind(
-					SyntaxKind.PropertyAccessExpression,
-				)
-					?.getText() !== "V.defineCCValues"
+			|| defineCCValuesCall
+				.getExpressionIfKind(SyntaxKind.PropertyAccessExpression)
+				?.getText() !== "V.defineCCValues"
 			|| defineCCValuesCall.getArguments().length !== 2
 		) {
 			continue;
@@ -126,21 +120,23 @@ export async function generateCCValueDefinitionsFile(
 		);
 		if (!definitions) continue;
 
-		const spreads = definitions.getProperties().filter((prop) =>
-			prop.isKind(SyntaxKind.SpreadAssignment)
-		);
+		const spreads = definitions
+			.getProperties()
+			.filter((prop) => prop.isKind(SyntaxKind.SpreadAssignment));
 		if (spreads.length === 0) continue;
 
 		const localDeclarationsToCopy = ccValuesDeclaration
 			.getDescendantsOfKind(SyntaxKind.Identifier)
 			.map((ident) => ident.getSymbol()?.getValueDeclaration())
-			.filter((decl): decl is Node =>
-				decl !== ccValuesDeclaration && decl != undefined
+			.filter(
+				(decl): decl is Node =>
+					decl !== ccValuesDeclaration && decl != undefined,
 			)
 			.map((decl): Statement | undefined => {
 				// Copy function declarations and top-level variable declarations
 				if (decl.isKind(SyntaxKind.FunctionDeclaration)) return decl;
-				const varStatement = decl.asKind(SyntaxKind.VariableDeclaration)
+				const varStatement = decl
+					.asKind(SyntaxKind.VariableDeclaration)
 					?.getVariableStatement();
 				if (varStatement?.getParent().isKind(SyntaxKind.SourceFile)) {
 					return varStatement;
@@ -151,20 +147,19 @@ export async function generateCCValueDefinitionsFile(
 			// deduplicate top-level declarations that might be referenced multiple times
 			// in the value definitions
 			.filter((decl, index, declarations) => {
-				const key =
-					`${decl.getSourceFile().getFilePath()}:${decl.getPos()}`;
+				const key = `${decl.getSourceFile().getFilePath()}:${decl.getPos()}`;
 				return (
 					declarations.findIndex(
 						(candidate) =>
 							`${candidate.getSourceFile().getFilePath()}:${candidate.getPos()}`
-								=== key,
+							=== key,
 					) === index
 				);
 			});
 
 		// Functions are hoisted and might need access to the CCValues definition
-		const localFunctionsToCopy = localDeclarationsToCopy.filter(
-			(decl) => decl.isKind(SyntaxKind.FunctionDeclaration),
+		const localFunctionsToCopy = localDeclarationsToCopy.filter((decl) =>
+			decl.isKind(SyntaxKind.FunctionDeclaration),
 		);
 		// consts/vars have to be defined first, so the CCValues definition can access them
 		const localVarsToCopy = localDeclarationsToCopy.filter(
@@ -190,9 +185,9 @@ export async function generateCCValueDefinitionsFile(
 				);
 				if (!def) continue;
 
-				const propertyKind = def.getExpressionIfKind(
-					SyntaxKind.PropertyAccessExpression,
-				)?.getName();
+				const propertyKind = def
+					.getExpressionIfKind(SyntaxKind.PropertyAccessExpression)
+					?.getName();
 
 				switch (propertyKind) {
 					case "staticProperty": {
@@ -248,12 +243,10 @@ ${getErrorMessage(e, true)}`);
 		// } else {
 		// 	exported += `\n${ccName}: `;
 		// }
-		exported +=
-			`\n[${ccEnum.getText()}]: ${ccValuesDeclaration.getName()},`;
+		exported += `\n[${ccEnum.getText()}]: ${ccValuesDeclaration.getName()},`;
 
-		const importsInDeclaration = ccValuesDeclaration.getDescendantsOfKind(
-			SyntaxKind.Identifier,
-		)
+		const importsInDeclaration = ccValuesDeclaration
+			.getDescendantsOfKind(SyntaxKind.Identifier)
 			.map((id) => id.getSymbol())
 			.filter((s) => s != undefined)
 			.map((s) => {
@@ -268,8 +261,8 @@ ${getErrorMessage(e, true)}`);
 		for (const imp of importsInDeclaration) {
 			const mod = imp.getImportDeclaration().getModuleSpecifierValue();
 			const importedName = imp.getName();
-			const isTypeOnly = imp.isTypeOnly()
-				|| imp.getImportDeclaration().isTypeOnly();
+			const isTypeOnly =
+				imp.isTypeOnly() || imp.getImportDeclaration().isTypeOnly();
 			if (ignoredImports.has(importedName)) continue;
 			// Ignore imports we already have and which aren't type-only
 			if (allImports.get(importedName) === false) continue;
@@ -292,17 +285,28 @@ export const CCValues = {
 };
 `;
 
-	result = `/// This file is auto-generated. All manual changes will be lost!
+	result =
+		`/// This file is auto-generated. All manual changes will be lost!
 
-` + [...importsByModule].map(([mod, names]) => {
-		const importSpecifiers = [...names].map(([name, typeOnly]) => {
-			return `${typeOnly ? "type " : ""}${name}`;
-		}).join(", ");
-		return `import {${importSpecifiers}} from "${mod}";`;
-	}).join("\n") + `\n\n` + result;
+`
+		+ [...importsByModule]
+			.map(([mod, names]) => {
+				const importSpecifiers = [...names]
+					.map(([name, typeOnly]) => {
+						return `${typeOnly ? "type " : ""}${name}`;
+					})
+					.join(", ");
+				return `import {${importSpecifiers}} from "${mod}";`;
+			})
+			.join("\n")
+		+ `\n\n`
+		+ result;
 
 	try {
-		result = formatWithDprint("index.ts", result);
+		result = await formatWithOxfmt(
+			path.join(srcDir, "cc/_CCValues.generated.ts"),
+			result,
+		);
 	} catch (e) {
 		console.error(`Error formatting: ${getErrorMessage(e)}`);
 		process.exit(1);
@@ -340,15 +344,15 @@ function inferOptions(optionsArgument: Node | undefined) {
 	// Support passing the options as an object, with or without `as const`
 	const optionsLiteral =
 		optionsArgument?.asKind(SyntaxKind.ObjectLiteralExpression)
-			?? optionsArgument
-				?.asKind(SyntaxKind.AsExpression)
-				?.getExpressionIfKind(SyntaxKind.ObjectLiteralExpression);
+		?? optionsArgument
+			?.asKind(SyntaxKind.AsExpression)
+			?.getExpressionIfKind(SyntaxKind.ObjectLiteralExpression);
 	// Use the provided options to overwrite the default ones, where defined
 	const mergedOptions = Object.entries(defaultCCValueOptions).map(
 		([key, value]) => {
-			const overwrittenOption = optionsLiteral?.getProperty(key)?.asKind(
-				SyntaxKind.PropertyAssignment,
-			);
+			const overwrittenOption = optionsLiteral
+				?.getProperty(key)
+				?.asKind(SyntaxKind.PropertyAssignment);
 			return [
 				key,
 				overwrittenOption?.getInitializer()?.getText()
@@ -361,15 +365,17 @@ function inferOptions(optionsArgument: Node | undefined) {
 		.join(",\n");
 	const supportsEndpoints =
 		mergedOptions.find(([key]) => key === "supportsEndpoints")?.[1]
-			=== "true";
+		=== "true";
 	return { supportsEndpoints, mergedOptionsString };
 }
 
 function parseStaticProperty(ccEnum: CCEnum, expr: CallExpression): string {
-	const propertyLiteral = expr.getArguments()[0].asKindOrThrow(
-		SyntaxKind.StringLiteral,
-		"parseStaticProperty expects the value property to be passed as a string literal as the first argument",
-	);
+	const propertyLiteral = expr
+		.getArguments()[0]
+		.asKindOrThrow(
+			SyntaxKind.StringLiteral,
+			"parseStaticProperty expects the value property to be passed as a string literal as the first argument",
+		);
 	const escapedProperty = propertyLiteral.getText();
 
 	const metaLiteralOrFunction = resolveObjectLiteralOrFunction(
@@ -414,16 +420,20 @@ function parseStaticPropertyWithName(
 	ccEnum: CCEnum,
 	expr: CallExpression,
 ): string {
-	const nameLiteral = expr.getArguments()[0].asKindOrThrow(
-		SyntaxKind.StringLiteral,
-		"parseStaticPropertyWithName expects the custom property name to be passed as a string literal as the first argument",
-	);
+	const nameLiteral = expr
+		.getArguments()[0]
+		.asKindOrThrow(
+			SyntaxKind.StringLiteral,
+			"parseStaticPropertyWithName expects the custom property name to be passed as a string literal as the first argument",
+		);
 	const escapedName = nameLiteral.getText();
 
-	const propertyLiteral = expr.getArguments()[1].asKindOrThrow(
-		SyntaxKind.StringLiteral,
-		"parseStaticPropertyWithName expects the value property to be passed as a string literal as the second argument",
-	);
+	const propertyLiteral = expr
+		.getArguments()[1]
+		.asKindOrThrow(
+			SyntaxKind.StringLiteral,
+			"parseStaticPropertyWithName expects the value property to be passed as a string literal as the second argument",
+		);
 	const escapedProperty = propertyLiteral.getText();
 
 	const metaLiteralOrFunction = resolveObjectLiteralOrFunction(
@@ -467,22 +477,28 @@ function parseStaticPropertyAndKeyWithName(
 	ccEnum: CCEnum,
 	expr: CallExpression,
 ): string {
-	const nameLiteral = expr.getArguments()[0].asKindOrThrow(
-		SyntaxKind.StringLiteral,
-		"parseStaticPropertyAndKeyWithName expects the custom property name to be passed as a string literal as the first argument",
-	);
+	const nameLiteral = expr
+		.getArguments()[0]
+		.asKindOrThrow(
+			SyntaxKind.StringLiteral,
+			"parseStaticPropertyAndKeyWithName expects the custom property name to be passed as a string literal as the first argument",
+		);
 	const escapedName = nameLiteral.getText();
 
-	const propertyLiteral = expr.getArguments()[1].asKindOrThrow(
-		SyntaxKind.StringLiteral,
-		"parseStaticPropertyAndKeyWithName expects the value property to be passed as a string literal as the second argument",
-	);
+	const propertyLiteral = expr
+		.getArguments()[1]
+		.asKindOrThrow(
+			SyntaxKind.StringLiteral,
+			"parseStaticPropertyAndKeyWithName expects the value property to be passed as a string literal as the second argument",
+		);
 	const escapedProperty = propertyLiteral.getText();
 
-	const propertyKeyLiteral = expr.getArguments()[2].asKindOrThrow(
-		SyntaxKind.StringLiteral,
-		"parseStaticPropertyAndKeyWithName expects the value propertyKey to be passed as a string literal as the third argument",
-	);
+	const propertyKeyLiteral = expr
+		.getArguments()[2]
+		.asKindOrThrow(
+			SyntaxKind.StringLiteral,
+			"parseStaticPropertyAndKeyWithName expects the value propertyKey to be passed as a string literal as the third argument",
+		);
 	const escapedPropertyKey = propertyKeyLiteral.getText();
 
 	const metaLiteralOrFunction = resolveObjectLiteralOrFunction(
@@ -531,29 +547,28 @@ function resolveStringLiteralOrFunction(
 	| ArrowFunction
 	| FunctionDeclaration
 	| ImportSpecifier
-	| undefined
-{
-	return node.asKind(SyntaxKind.StringLiteral)
+	| undefined {
+	return (
+		node.asKind(SyntaxKind.StringLiteral)
 		?? node.asKind(SyntaxKind.ArrowFunction)
-		?? node.getSymbol()?.getValueDeclaration()?.asKind(
-			SyntaxKind.FunctionDeclaration,
-		)
-		?? node.getSymbol()?.getValueDeclaration()?.asKind(
-			SyntaxKind.ArrowFunction,
-		)
-		?? node.getSymbol()?.getDeclarations()[0]?.asKind(
-			SyntaxKind.ImportSpecifier,
-		);
+		?? node
+			.getSymbol()
+			?.getValueDeclaration()
+			?.asKind(SyntaxKind.FunctionDeclaration)
+		?? node
+			.getSymbol()
+			?.getValueDeclaration()
+			?.asKind(SyntaxKind.ArrowFunction)
+		?? node
+			.getSymbol()
+			?.getDeclarations()[0]
+			?.asKind(SyntaxKind.ImportSpecifier)
+	);
 }
 
 function resolveObjectLiteralOrFunction(
 	node: Node,
-):
-	| ObjectLiteralExpression
-	| ArrowFunction
-	| FunctionDeclaration
-	| undefined
-{
+): ObjectLiteralExpression | ArrowFunction | FunctionDeclaration | undefined {
 	if (
 		node.isKind(SyntaxKind.AsExpression)
 		&& node.getTypeNode()?.getText() === "const"
@@ -561,22 +576,22 @@ function resolveObjectLiteralOrFunction(
 		return node.getExpressionIfKind(SyntaxKind.ObjectLiteralExpression);
 	}
 
-	return node.asKind(SyntaxKind.ObjectLiteralExpression)
+	return (
+		node.asKind(SyntaxKind.ObjectLiteralExpression)
 		?? node.asKind(SyntaxKind.ArrowFunction)
-		?? node.getSymbol()?.getValueDeclaration()?.asKind(
-			SyntaxKind.FunctionDeclaration,
-		)
-		?? node.getSymbol()?.getValueDeclaration()?.asKind(
-			SyntaxKind.ArrowFunction,
-		);
+		?? node
+			.getSymbol()
+			?.getValueDeclaration()
+			?.asKind(SyntaxKind.FunctionDeclaration)
+		?? node
+			.getSymbol()
+			?.getValueDeclaration()
+			?.asKind(SyntaxKind.ArrowFunction)
+	);
 }
 
 function getStringLiteralOrFunctionText(
-	node:
-		| StringLiteral
-		| ArrowFunction
-		| FunctionDeclaration
-		| ImportSpecifier,
+	node: StringLiteral | ArrowFunction | FunctionDeclaration | ImportSpecifier,
 ): string {
 	if (node.isKind(SyntaxKind.StringLiteral)) {
 		return node.getText();
@@ -599,8 +614,11 @@ function getStringLiteralOrFunctionText(
 		body.getStatements().length === 1
 		&& body.getStatements()[0].isKind(SyntaxKind.ReturnStatement)
 	) {
-		return body.getStatements()[0].asKindOrThrow(SyntaxKind.ReturnStatement)
-			.getExpressionOrThrow().getText();
+		return body
+			.getStatements()[0]
+			.asKindOrThrow(SyntaxKind.ReturnStatement)
+			.getExpressionOrThrow()
+			.getText();
 	}
 	// Wrap the rest in an IIFE
 	return `(() => {
@@ -610,17 +628,13 @@ function getStringLiteralOrFunctionText(
 
 function stripAsConstAndParentheses(node: Node): Node {
 	if (node.isKind(SyntaxKind.ParenthesizedExpression)) {
-		return stripAsConstAndParentheses(
-			node.getExpression(),
-		);
+		return stripAsConstAndParentheses(node.getExpression());
 	}
 	if (
 		node.isKind(SyntaxKind.AsExpression)
 		&& node.getTypeNode()?.getText() === "const"
 	) {
-		return stripAsConstAndParentheses(
-			node.getExpression(),
-		);
+		return stripAsConstAndParentheses(node.getExpression());
 	}
 	return node;
 }
@@ -632,9 +646,9 @@ function stripAsConstAndParentheses(node: Node): Node {
 function inferMinMaxStepsFromAllowedLiteral(
 	node: ObjectLiteralExpression,
 ): { min: number; max: number; steps?: number } | undefined {
-	const allowedProp = node.getProperty("allowed")?.asKind(
-		SyntaxKind.PropertyAssignment,
-	);
+	const allowedProp = node
+		.getProperty("allowed")
+		?.asKind(SyntaxKind.PropertyAssignment);
 	if (!allowedProp) return undefined;
 
 	const allowedArray = allowedProp.getInitializerIfKind(
@@ -651,9 +665,9 @@ function inferMinMaxStepsFromAllowedLiteral(
 		if (!obj) continue;
 
 		// Check for single value: { value: <number> }
-		const valueProp = obj.getProperty("value")?.asKind(
-			SyntaxKind.PropertyAssignment,
-		);
+		const valueProp = obj
+			.getProperty("value")
+			?.asKind(SyntaxKind.PropertyAssignment);
 		if (valueProp) {
 			const init = valueProp.getInitializer();
 			if (init) {
@@ -667,12 +681,12 @@ function inferMinMaxStepsFromAllowedLiteral(
 		}
 
 		// Check for range: { from: <number>, to: <number>, step?: <number> }
-		const fromProp = obj.getProperty("from")?.asKind(
-			SyntaxKind.PropertyAssignment,
-		);
-		const toProp = obj.getProperty("to")?.asKind(
-			SyntaxKind.PropertyAssignment,
-		);
+		const fromProp = obj
+			.getProperty("from")
+			?.asKind(SyntaxKind.PropertyAssignment);
+		const toProp = obj
+			.getProperty("to")
+			?.asKind(SyntaxKind.PropertyAssignment);
 		if (fromProp && toProp) {
 			const fromNum = fromProp.getInitializer()
 				? parseNumericLiteral(fromProp.getInitializer()!)
@@ -685,9 +699,9 @@ function inferMinMaxStepsFromAllowedLiteral(
 				max = Math.max(max, toNum);
 			}
 
-			const stepProp = obj.getProperty("step")?.asKind(
-				SyntaxKind.PropertyAssignment,
-			);
+			const stepProp = obj
+				.getProperty("step")
+				?.asKind(SyntaxKind.PropertyAssignment);
 			const stepNum = stepProp?.getInitializer()
 				? parseNumericLiteral(stepProp.getInitializer()!)
 				: undefined;
@@ -720,15 +734,15 @@ function injectAllowedDefaults(
 	if (!inferred) return text;
 
 	// Check which properties are already explicitly set (not from spreads)
-	const hasExplicitMin = node.getProperty("min")?.asKind(
-		SyntaxKind.PropertyAssignment,
-	) != undefined;
-	const hasExplicitMax = node.getProperty("max")?.asKind(
-		SyntaxKind.PropertyAssignment,
-	) != undefined;
-	const hasExplicitSteps = node.getProperty("steps")?.asKind(
-		SyntaxKind.PropertyAssignment,
-	) != undefined;
+	const hasExplicitMin =
+		node.getProperty("min")?.asKind(SyntaxKind.PropertyAssignment)
+		!= undefined;
+	const hasExplicitMax =
+		node.getProperty("max")?.asKind(SyntaxKind.PropertyAssignment)
+		!= undefined;
+	const hasExplicitSteps =
+		node.getProperty("steps")?.asKind(SyntaxKind.PropertyAssignment)
+		!= undefined;
 
 	const additions: string[] = [];
 	if (!hasExplicitMin) additions.push(`min: ${inferred.min}`);
@@ -743,10 +757,12 @@ function injectAllowedDefaults(
 	const lastBrace = text.lastIndexOf("}");
 	if (lastBrace === -1) return text;
 
-	return text.slice(0, lastBrace)
+	return (
+		text.slice(0, lastBrace)
 		+ additions.join(",\n")
 		+ ",\n"
-		+ text.slice(lastBrace);
+		+ text.slice(lastBrace)
+	);
 }
 
 function inferMetaBody(
@@ -784,7 +800,9 @@ function inferMetaBody(
 		&& body.getStatements()[0].isKind(SyntaxKind.ReturnStatement)
 	) {
 		const stripped = stripAsConstAndParentheses(
-			body.getStatements()[0].asKindOrThrow(SyntaxKind.ReturnStatement)
+			body
+				.getStatements()[0]
+				.asKindOrThrow(SyntaxKind.ReturnStatement)
 				.getExpressionOrThrow(),
 		);
 		const objLiteral = stripped.asKind(SyntaxKind.ObjectLiteralExpression);
@@ -802,10 +820,12 @@ function parseDynamicPropertyWithName(
 	ccEnum: CCEnum,
 	expr: CallExpression,
 ): string {
-	const nameLiteral = expr.getArguments()[0].asKindOrThrow(
-		SyntaxKind.StringLiteral,
-		"parseDynamicPropertyWithName expects the custom property name to be passed as a string literal as the first argument",
-	);
+	const nameLiteral = expr
+		.getArguments()[0]
+		.asKindOrThrow(
+			SyntaxKind.StringLiteral,
+			"parseDynamicPropertyWithName expects the custom property name to be passed as a string literal as the first argument",
+		);
 	const escapedName = nameLiteral.getText();
 
 	const propertyLiteralOrFunction = resolveStringLiteralOrFunction(
@@ -820,9 +840,7 @@ function parseDynamicPropertyWithName(
 		propertyLiteralOrFunction,
 	);
 
-	const isPredicate = expr.getArguments()[2].asKind(
-		SyntaxKind.ArrowFunction,
-	);
+	const isPredicate = expr.getArguments()[2].asKind(SyntaxKind.ArrowFunction);
 	if (!isPredicate || !isPredicate.getReturnType().isBoolean()) {
 		throw new Error(
 			"parseDynamicPropertyWithName expects the third argument to be an arrow function with return type boolean",
@@ -838,9 +856,9 @@ function parseDynamicPropertyWithName(
 
 	const valueParams = (
 		propertyLiteralOrFunction.asKind(SyntaxKind.ArrowFunction)
-			?? propertyLiteralOrFunction.asKind(SyntaxKind.FunctionDeclaration)
-			?? metaLiteralOrFunction?.asKind(SyntaxKind.ArrowFunction)
-			?? metaLiteralOrFunction?.asKind(SyntaxKind.FunctionDeclaration)
+		?? propertyLiteralOrFunction.asKind(SyntaxKind.FunctionDeclaration)
+		?? metaLiteralOrFunction?.asKind(SyntaxKind.ArrowFunction)
+		?? metaLiteralOrFunction?.asKind(SyntaxKind.FunctionDeclaration)
 	)?.getParameters();
 
 	if (!valueParams) {
@@ -863,9 +881,10 @@ function parseDynamicPropertyWithName(
 	);
 
 	const dynamicPart = `(${formattedArgs}) => {
-	const property = ${
-		propertyInitializer.replace("...args", formattedArgNames)
-	};
+	const property = ${propertyInitializer.replace(
+		"...args",
+		formattedArgNames,
+	)};
 
 	return {
 		id: {
@@ -897,10 +916,12 @@ function parseDynamicPropertyAndKeyWithName(
 	ccEnum: CCEnum,
 	expr: CallExpression,
 ): string {
-	const nameLiteral = expr.getArguments()[0].asKindOrThrow(
-		SyntaxKind.StringLiteral,
-		"parseDynamicPropertyAndKeyWithName expects the custom property name to be passed as a string literal as the first argument",
-	);
+	const nameLiteral = expr
+		.getArguments()[0]
+		.asKindOrThrow(
+			SyntaxKind.StringLiteral,
+			"parseDynamicPropertyAndKeyWithName expects the custom property name to be passed as a string literal as the first argument",
+		);
 	const escapedName = nameLiteral.getText();
 
 	const propertyLiteralOrFunction = resolveStringLiteralOrFunction(
@@ -928,9 +949,7 @@ function parseDynamicPropertyAndKeyWithName(
 		propertyKeyLiteralOrFunction,
 	);
 
-	const isPredicate = expr.getArguments()[3].asKind(
-		SyntaxKind.ArrowFunction,
-	);
+	const isPredicate = expr.getArguments()[3].asKind(SyntaxKind.ArrowFunction);
 	if (!isPredicate || !isPredicate.getReturnType().isBoolean()) {
 		throw new Error(
 			"parseDynamicPropertyAndKeyWithName expects the fourth argument to be an arrow function with return type boolean",
@@ -945,13 +964,11 @@ function parseDynamicPropertyAndKeyWithName(
 
 	const valueParams = (
 		propertyLiteralOrFunction.asKind(SyntaxKind.ArrowFunction)
-			?? propertyLiteralOrFunction.asKind(SyntaxKind.FunctionDeclaration)
-			?? propertyKeyLiteralOrFunction.asKind(SyntaxKind.ArrowFunction)
-			?? propertyKeyLiteralOrFunction.asKind(
-				SyntaxKind.FunctionDeclaration,
-			)
-			?? metaLiteralOrFunction?.asKind(SyntaxKind.ArrowFunction)
-			?? metaLiteralOrFunction?.asKind(SyntaxKind.FunctionDeclaration)
+		?? propertyLiteralOrFunction.asKind(SyntaxKind.FunctionDeclaration)
+		?? propertyKeyLiteralOrFunction.asKind(SyntaxKind.ArrowFunction)
+		?? propertyKeyLiteralOrFunction.asKind(SyntaxKind.FunctionDeclaration)
+		?? metaLiteralOrFunction?.asKind(SyntaxKind.ArrowFunction)
+		?? metaLiteralOrFunction?.asKind(SyntaxKind.FunctionDeclaration)
 	)?.getParameters();
 
 	if (!valueParams) {
@@ -975,12 +992,14 @@ function parseDynamicPropertyAndKeyWithName(
 	);
 
 	const dynamicPart = `(${formattedArgs}) => {
-	const property = ${
-		propertyInitializer.replace("...args", formattedArgNames)
-	};
-	const propertyKey = ${
-		propertyKeyInitializer.replace("...args", formattedArgNames)
-	};
+	const property = ${propertyInitializer.replace(
+		"...args",
+		formattedArgNames,
+	)};
+	const propertyKey = ${propertyKeyInitializer.replace(
+		"...args",
+		formattedArgNames,
+	)};
 
 	return {
 		id: {

@@ -14,46 +14,38 @@
 		"min": "0.0",
 		"max": "255.255"
 	},
+	"endpoints": {
+		"1": { "label": "Output 1" },
+		"2": { "label": "Output 2" },
+		"3": { "label": "Output 3" },
+		"4": { "label": "Output 4" },
+		"5": { "label": "Output 5" },
+		"6": { "label": "Output 6" },
+		"7": { "label": "Output 7" },
+		"8": { "label": "Output 8" },
+		"9": { "label": "Output 9" },
+		"10": { "label": "Temperature Sensor 1" },
+		"11": { "label": "Temperature Sensor 2" }
+	},
 	"paramInformation": [
 		{
 			"#": "1",
-			"label": "Input 1 Calibration",
-			"valueSize": 1,
-			"unit": "0.1 °C",
-			"minValue": -60,
-			"maxValue": 60,
-			"defaultValue": 0,
-			"unsigned": false
+			"$import": "templates/heatit_template.json#temperature_sensor_calibration_60",
+			"label": "Input 1 Calibration"
 		},
 		{
 			"#": "2",
-			"label": "Input 2 Calibration",
-			"valueSize": 1,
-			"unit": "0.1 °C",
-			"minValue": -60,
-			"maxValue": 60,
-			"defaultValue": 0,
-			"unsigned": false
+			"$import": "templates/heatit_template.json#temperature_sensor_calibration_60",
+			"label": "Input 2 Calibration"
 		},
 		{
 			"#": "3",
-			"$purpose": "reporting_interval.temperature",
-			"label": "Temperature Report Interval",
-			"valueSize": 2,
-			"unit": "seconds",
-			"minValue": 30,
-			"maxValue": 65535,
-			"defaultValue": 870,
-			"unsigned": true
+			"$import": "templates/heatit_template.json#temperature_report_interval",
+			"defaultValue": 870
 		},
 		{
 			"#": "4",
-			"label": "Temperature Report Hysteresis",
-			"valueSize": 1,
-			"unit": "0.1 °C",
-			"minValue": 1,
-			"maxValue": 100,
-			"defaultValue": 10
+			"$import": "templates/heatit_template.json#temperature_report_hysteresis"
 		},
 		{
 			"#": "5",

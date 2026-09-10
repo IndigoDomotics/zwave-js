@@ -9,6 +9,7 @@ import type {
 import type { Serial, ZWaveSerialStream } from "@zwave-js/serial";
 import type { BytesView, DeepPartial, Expand } from "@zwave-js/shared";
 import type { DatabaseFactory, FileSystem } from "@zwave-js/shared/bindings";
+
 import type {
 	InclusionUserCallbacks,
 	JoinNetworkUserCallbacks,
@@ -459,6 +460,12 @@ export interface ZWaveOptions {
 		manufacturerId: number;
 		productType: number;
 		productId: number;
+		/**
+		 * A stable device identifier for Manufacturer Specific Device Specific Reports.
+		 * Strings are encoded as UTF-8. Uint8Arrays are encoded as binary.
+		 * The encoded identifier may be up to 31 bytes.
+		 */
+		deviceId?: string | Uint8Array;
 
 		/** The version of the hardware the application is running on. Can be omitted if unknown. */
 		hardwareVersion?: number;
@@ -500,6 +507,7 @@ export interface ZWaveOptions {
 	};
 }
 
+// oxfmt-ignore
 export type PartialZWaveOptions = Expand<
 	& DeepPartial<
 		Omit<
@@ -527,7 +535,7 @@ export type PartialZWaveOptions = Expand<
 >;
 
 export type EditableZWaveOptions = Expand<
-	& Pick<
+	Pick<
 		PartialZWaveOptions,
 		| "attempts"
 		| "disableOptimisticValueUpdate"
@@ -538,75 +546,72 @@ export type EditableZWaveOptions = Expand<
 		| "logConfig"
 		| "preferences"
 		| "vendor"
-	>
-	& {
+	> & {
 		userAgent?: Record<string, string | null | undefined>;
 	}
 >;
 
-export const driverPresets = Object.freeze(
-	{
-		/**
-		 * Increases several timeouts to be able to deal with controllers
-		 * and/or nodes that have severe trouble communicating.
-		 */
-		SAFE_MODE: {
-			timeouts: {
-				// 500 series controllers that take long to respond instead of delaying the callback
-				response: 60000,
-				// Any controller having trouble reaching a node
-				sendDataAbort: 60000,
-				sendDataCallback: 65000,
-				// Slow nodes taking long to respond
-				report: 10000,
-				nonce: 20000,
-			},
-			attempts: {
-				// Increase communication attempts with nodes to their maximum
-				sendData: 5,
-				sendDataJammed: 10,
-				nodeInterview: 10,
-			},
+export const driverPresets = Object.freeze({
+	/**
+	 * Increases several timeouts to be able to deal with controllers
+	 * and/or nodes that have severe trouble communicating.
+	 */
+	SAFE_MODE: {
+		timeouts: {
+			// 500 series controllers that take long to respond instead of delaying the callback
+			response: 60000,
+			// Any controller having trouble reaching a node
+			sendDataAbort: 60000,
+			sendDataCallback: 65000,
+			// Slow nodes taking long to respond
+			report: 10000,
+			nonce: 20000,
 		},
+		attempts: {
+			// Increase communication attempts with nodes to their maximum
+			sendData: 5,
+			sendDataJammed: 10,
+			nodeInterview: 10,
+		},
+	},
 
-		/**
-		 * Disables the unresponsive controller recovery to be able to deal with controllers
-		 * that frequently become unresponsive for seemingly no reason.
-		 */
-		NO_CONTROLLER_RECOVERY: {
-			features: {
-				unresponsiveControllerRecovery: false,
-			},
+	/**
+	 * Disables the unresponsive controller recovery to be able to deal with controllers
+	 * that frequently become unresponsive for seemingly no reason.
+	 */
+	NO_CONTROLLER_RECOVERY: {
+		features: {
+			unresponsiveControllerRecovery: false,
 		},
+	},
 
-		/**
-		 * @deprecated
-		 * This used to prevent the driver from enabling the watchdog on 700 series controllers.
-		 * This is now the default behavior, so this option is no longer necessary.
-		 */
-		NO_WATCHDOG: {
-			features: {
-				watchdog: false,
-			},
+	/**
+	 * @deprecated
+	 * This used to prevent the driver from enabling the watchdog on 700 series controllers.
+	 * This is now the default behavior, so this option is no longer necessary.
+	 */
+	NO_WATCHDOG: {
+		features: {
+			watchdog: false,
 		},
+	},
 
-		/**
-		 * Sends battery powered nodes to sleep more quickly in order to save battery.
-		 */
-		BATTERY_SAVE: {
-			timeouts: {
-				sendToSleep: 100,
-			},
+	/**
+	 * Sends battery powered nodes to sleep more quickly in order to save battery.
+	 */
+	BATTERY_SAVE: {
+		timeouts: {
+			sendToSleep: 100,
 		},
+	},
 
-		/**
-		 * Sends battery powered nodes to sleep less quickly to give applications
-		 * more time between interactions.
-		 */
-		AWAKE_LONGER: {
-			timeouts: {
-				sendToSleep: 1000,
-			},
+	/**
+	 * Sends battery powered nodes to sleep less quickly to give applications
+	 * more time between interactions.
+	 */
+	AWAKE_LONGER: {
+		timeouts: {
+			sendToSleep: 1000,
 		},
-	} as const satisfies Record<string, PartialZWaveOptions>,
-);
+	},
+} as const satisfies Record<string, PartialZWaveOptions>);

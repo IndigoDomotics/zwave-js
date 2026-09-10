@@ -1,6 +1,8 @@
-import { AST_NODE_TYPES, ESLintUtils } from "@typescript-eslint/utils";
 import path from "node:path";
-import { repoRoot } from "../utils.js";
+
+import { AST_NODE_TYPES } from "@typescript-eslint/utils";
+
+import { type OxlintCompatibleRule, repoRoot } from "../utils.js";
 
 const isFixMode = process.argv.some((arg) => arg.startsWith("--fix"));
 
@@ -12,19 +14,21 @@ const integrationTestDefinitionFiles = new Set(
 		"packages/zwave-js/src/lib/test/integrationTestSuiteMulti.ts",
 		"packages/zwave-js/src/lib/test/integrationTestSuite.js",
 		"packages/zwave-js/src/lib/test/integrationTestSuiteMulti.js",
-	].map((p) => p.replaceAll("/", path.sep))
+	]
+		.map((p) => p.replaceAll("/", path.sep))
 		.map((p) => path.join(repoRoot, p)),
 );
 
-const integrationTestExportNames = new Set([
-	"integrationTest",
-]);
+const integrationTestExportNames = new Set(["integrationTest"]);
 
-export const noDebugInTests = ESLintUtils.RuleCreator.withoutDocs({
-	create(context) {
+export const noDebugInTests: OxlintCompatibleRule = {
+	createOnce(context) {
 		const integrationTestMethodNames = new Set<string>();
 
 		return {
+			before() {
+				integrationTestMethodNames.clear();
+			},
 			ImportSpecifier(node) {
 				if (!context.filename.endsWith(".test.ts")) return;
 
@@ -34,10 +38,12 @@ export const noDebugInTests = ESLintUtils.RuleCreator.withoutDocs({
 					node.imported.type === AST_NODE_TYPES.Identifier
 					&& integrationTestExportNames.has(node.imported.name)
 					&& node.parent.type === AST_NODE_TYPES.ImportDeclaration
-					&& integrationTestDefinitionFiles.has(path.join(
-						path.dirname(context.filename),
-						node.parent.source.value,
-					))
+					&& integrationTestDefinitionFiles.has(
+						path.join(
+							path.dirname(context.filename),
+							node.parent.source.value,
+						),
+					)
 				) {
 					integrationTestMethodNames.add(node.local.name);
 				}
@@ -84,4 +90,4 @@ export const noDebugInTests = ESLintUtils.RuleCreator.withoutDocs({
 		},
 	},
 	defaultOptions: [],
-});
+};

@@ -12,6 +12,7 @@ import {
 	createMockZWaveRequestFrame,
 } from "@zwave-js/testing";
 import { wait } from "alcalzone-shared/async";
+
 import { integrationTest } from "../integrationTestSuite.js";
 
 integrationTest("Receiving Transport Service commands works (happy path)", {
@@ -22,8 +23,7 @@ integrationTest("Receiving Transport Service commands works (happy path)", {
 			nodeId: 2,
 			parameter: 1,
 			reportsToFollow: 0,
-			info:
-				"Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
+			info: "Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
 		});
 		const ccBuffer = await cc.serialize(mockNode.encodingContext);
 		const part1 = ccBuffer.slice(0, 39);
@@ -91,8 +91,7 @@ integrationTest(
 				nodeId: 2,
 				parameter: 1,
 				reportsToFollow: 0,
-				info:
-					"Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
+				info: "Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
 			});
 			const ccBuffer = await cc.serialize(mockNode.encodingContext);
 			const part1 = ccBuffer.slice(0, 39);
@@ -159,8 +158,7 @@ integrationTest(
 				nodeId: 2,
 				parameter: 1,
 				reportsToFollow: 0,
-				info:
-					"Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
+				info: "Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
 			});
 			const ccBuffer = await cc.serialize(mockNode.encodingContext);
 			const part1 = ccBuffer.slice(0, 39);
@@ -233,9 +231,7 @@ integrationTest(
 			// And the ConfigurationCCInfoReport should have been assembled correctly
 			const received = await awaitedCommand;
 			t.expect(received).toBeInstanceOf(ConfigurationCCInfoReport);
-			t.expect(received.info).toBe(
-				cc.info,
-			);
+			t.expect(received.info).toBe(cc.info);
 		},
 	},
 );
@@ -250,8 +246,7 @@ integrationTest(
 				nodeId: 2,
 				parameter: 1,
 				reportsToFollow: 0,
-				info:
-					"Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
+				info: "Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
 			});
 			const ccBuffer = await cc.serialize(mockNode.encodingContext);
 			const part1 = ccBuffer.slice(0, 39);
@@ -323,9 +318,7 @@ integrationTest(
 			// And the ConfigurationCCInfoReport should have been assembled correctly
 			const received = await awaitedCommand;
 			t.expect(received).toBeInstanceOf(ConfigurationCCInfoReport);
-			t.expect(received.info).toBe(
-				cc.info,
-			);
+			t.expect(received.info).toBe(cc.info);
 		},
 	},
 );
@@ -340,8 +333,7 @@ integrationTest(
 				nodeId: 2,
 				parameter: 1,
 				reportsToFollow: 0,
-				info:
-					"Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
+				info: "Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
 			});
 			const ccBuffer = await cc.serialize(mockNode.encodingContext);
 			const part1 = ccBuffer.slice(0, 39);
@@ -384,43 +376,46 @@ integrationTest(
 				createMockZWaveRequestFrame(frame2),
 			);
 			await wait(30);
+
+			// Register the expectation before sending the final segment, or the
+			// SegmentComplete may arrive before the expectation is set up
+			const expectSegmentComplete = mockNode.expectControllerFrame(
+				(f): f is MockZWaveRequestFrame =>
+					f.type === MockZWaveFrameType.Request
+					&& f.payload instanceof TransportServiceCCSegmentComplete,
+				{
+					timeout: 1000,
+				},
+			);
 			await mockNode.sendToController(
 				createMockZWaveRequestFrame(frame3),
 			);
 
 			// The node should have received the confirmation
-			await mockNode.expectControllerFrame(
-				(f): f is MockZWaveRequestFrame =>
-					f.type === MockZWaveFrameType.Request
-					&& f.payload instanceof TransportServiceCCSegmentComplete,
-				{
-					timeout: 100,
-				},
-			);
+			await expectSegmentComplete;
 			mockNode.clearReceivedControllerFrames();
 
 			// And the ConfigurationCCInfoReport should have been assembled correctly
 			const received = await awaitedCommand;
 			t.expect(received).toBeInstanceOf(ConfigurationCCInfoReport);
-			t.expect(received.info).toBe(
-				cc.info,
-			);
+			t.expect(received.info).toBe(cc.info);
 
 			// Simulate the SegmentComplete being lost. The node should send the last segment again
 
+			const expectSegmentComplete2 = mockNode.expectControllerFrame(
+				(f): f is MockZWaveRequestFrame =>
+					f.type === MockZWaveFrameType.Request
+					&& f.payload instanceof TransportServiceCCSegmentComplete,
+				{
+					timeout: 1000,
+				},
+			);
 			await mockNode.sendToController(
 				createMockZWaveRequestFrame(frame3),
 			);
 
 			// The node should have received the confirmation again
-			await mockNode.expectControllerFrame(
-				(f): f is MockZWaveRequestFrame =>
-					f.type === MockZWaveFrameType.Request
-					&& f.payload instanceof TransportServiceCCSegmentComplete,
-				{
-					timeout: 100,
-				},
-			);
+			await expectSegmentComplete2;
 			mockNode.clearReceivedControllerFrames();
 		},
 	},
@@ -436,8 +431,7 @@ integrationTest(
 				nodeId: 2,
 				parameter: 1,
 				reportsToFollow: 0,
-				info:
-					"Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
+				info: "Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong text",
 			});
 			const ccBuffer = await cc.serialize(mockNode.encodingContext);
 			const part1 = ccBuffer.slice(0, 39);

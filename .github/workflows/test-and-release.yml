@@ -55,7 +55,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Prepare testing environment
       uses: ./.github/actions/prepare-env
@@ -83,7 +83,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Restore Turbo Cache from previous jobs
       uses: ./.github/actions/build-cache-download
@@ -184,7 +184,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Prepare testing environment
       uses: ./.github/actions/prepare-env
@@ -194,36 +194,6 @@ jobs:
 
     - name: Run linters
       run: yarn run lint $TURBO_FLAGS
-
-    - name: Prepare lint auto-fix patch
-      if: |
-        failure() &&
-        github.event_name == 'pull_request'
-      id: lint
-      run: |
-        # Run all lint commands and abort if one has unfixable errors
-        yarn run lint:ts:fix $TURBO_FLAGS
-        yarn fmt $TURBO_FLAGS
-
-        git diff --name-only || true
-        if ! git diff --quiet ; then
-          echo "has changes"
-          git diff > fix.patch
-          echo "changed=true" >> $GITHUB_OUTPUT
-        else
-          echo "unchanged"
-          echo "changed=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Upload Patch
-      if: |
-        failure() &&
-        github.event_name == 'pull_request' &&
-        steps.lint.outputs.changed == 'true'
-      uses: actions/upload-artifact@v7
-      with:
-        name: lint-fix
-        path: fix.patch
 
   # ===================
 
@@ -236,7 +206,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Prepare testing environment
       uses: ./.github/actions/prepare-env
@@ -262,7 +232,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Prepare testing environment
       uses: ./.github/actions/prepare-env
@@ -295,7 +265,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Prepare testing environment
       uses: ./.github/actions/prepare-env
@@ -329,7 +299,7 @@ jobs:
 
   #   steps:
   #   - name: Checkout code
-  #     uses: actions/checkout@v6
+  #     uses: actions/checkout@v7
 
   #   - name: Restore Turbo Cache from previous jobs
   #     uses: ./.github/actions/build-cache-download
@@ -378,7 +348,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Prepare testing environment
       uses: ./.github/actions/prepare-env
@@ -414,7 +384,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Prepare testing environment
       uses: ./.github/actions/prepare-env
@@ -457,7 +427,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Restore Turbo Cache from previous jobs
       uses: ./.github/actions/build-cache-download
@@ -534,7 +504,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Prepare testing environment
       uses: ./.github/actions/prepare-env

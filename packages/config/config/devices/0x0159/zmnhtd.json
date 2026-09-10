@@ -13,6 +13,10 @@
 		"min": "0.0",
 		"max": "255.255"
 	},
+	"endpoints": {
+		"1": { "label": "IR External Relay" },
+		"2": { "label": "External Relay" }
+	},
 	"paramInformation": [
 		{
 			"#": "7",
@@ -126,10 +130,7 @@
 			"label": "Power (W) Reporting Internal",
 			"valueSize": 2,
 			"unit": "seconds",
-			"allowed": [
-				{ "value": 0 },
-				{ "range": [60, 32535] }
-			],
+			"allowed": [{ "value": 0 }, { "range": [60, 32535] }],
 			"defaultValue": 600,
 			"options": [
 				{

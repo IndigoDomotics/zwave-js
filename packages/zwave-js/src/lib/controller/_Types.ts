@@ -26,6 +26,7 @@ export type FirmwareUpdateDeviceID = Expand<
 	// The firmware update service does not support SDK version
 	Omit<DeviceID, "sdkVersion"> & {
 		firmwareVersion: string;
+		additionalFirmwareVersions?: Record<string, string>;
 		rfRegion?: RFRegion;
 	}
 >;
@@ -46,6 +47,7 @@ export interface FirmwareUpdateBulkInfo {
 	productType: string;
 	productId: string;
 	firmwareVersion: string;
+	additionalFirmwareVersions?: Record<string, string>;
 	updates: FirmwareUpdateServiceResponse[];
 }
 
@@ -56,10 +58,9 @@ export type FirmwareUpdateInfo = Expand<
 	}
 >;
 
-export function isFirmwareUpdateInfo(
-	info: any,
-): info is FirmwareUpdateInfo {
-	return typeof info === "object"
+export function isFirmwareUpdateInfo(info: any): info is FirmwareUpdateInfo {
+	return (
+		typeof info === "object"
 		&& info !== null
 		&& typeof info.version === "string"
 		&& typeof info.normalizedVersion === "string"
@@ -70,7 +71,8 @@ export function isFirmwareUpdateInfo(
 		&& typeof info.device.manufacturerId === "number"
 		&& typeof info.device.productType === "number"
 		&& typeof info.device.productId === "number"
-		&& typeof info.device.firmwareVersion === "string";
+		&& typeof info.device.firmwareVersion === "string"
+	);
 }
 
 export interface GetFirmwareUpdatesOptions {

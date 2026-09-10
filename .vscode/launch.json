@@ -9,11 +9,7 @@
 			"request": "launch",
 			"name": "Debug current test",
 			"runtimeExecutable": "yarn",
-			"runtimeArgs": [
-				"test",
-				"--async-stack-traces",
-				"${file}"
-			],
+			"runtimeArgs": ["test", "--async-stack-traces", "${file}"],
 			"env": {
 				"NODE_ENV": "development"
 				// "NO_CACHE": "true"
@@ -125,6 +121,25 @@
 				"--async-stack-traces",
 				"--conditions=@@dev",
 				"${workspaceFolder}/test/run_zniffer.ts"
+			],
+			"env": {
+				"NODE_ENV": "development"
+			},
+			"console": "integratedTerminal",
+			"skipFiles": ["<node_internals>/**"],
+			"sourceMaps": true
+			// "preLaunchTask": "npm: build"
+		},
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "Run RCP Host",
+			"runtimeExecutable": "yarn",
+			"runtimeArgs": [
+				"tsx",
+				"--async-stack-traces",
+				"--conditions=@@dev",
+				"${workspaceFolder}/test/run_rcp.ts"
 			],
 			"env": {
 				"NODE_ENV": "development"

@@ -20,6 +20,10 @@ jobs:
     - name: Checkout master branch
       uses: actions/checkout@v7
 
+    # Installs the shared bot-scripts dependencies and exports BOT_SCRIPTS_DIR
+    - name: Setup bot scripts
+      uses: zwave-js/bot-workflows/actions/setup-bot@v1
+
     - name: Extract log file from issue body
       uses: actions/github-script@v9
       id: extract
@@ -27,7 +31,7 @@ jobs:
         github-token: ${{secrets.BOT_TOKEN}}
         result-encoding: string
         script: |
-          const bot = require(`${process.env.GITHUB_WORKSPACE}/.github/bot-scripts/index.cjs`);
+          const bot = require(`${process.env.BOT_SCRIPTS_DIR}/index.cjs`);
           const extractResult = await bot.extractLogfile({github, context});
 
           if (!extractResult) {
@@ -46,259 +50,92 @@ jobs:
           return extractResult;
 
 
-    - name: Classify logfile using AI
-      id: ai_detection
-      if: steps.extract.outputs.shouldContinue == 'true'
-      uses: actions/ai-inference@v2.1.1
-      with:
-        model: openai/gpt-4o-mini
-        system-prompt: |
-          You are a log file classifier for the Z-Wave JS project. Your task is to classify log files that users have uploaded, and check whether they uploaded the correct log files with the correct log level ("debug"). The log files you will typically encounter can be divided into the following groups:
-
-          - Log files from Z-Wave JS with the correct log level
-          - Log files from Z-Wave JS with the wrong log level
-          - Log files from Z-Wave JS UI
-          - Log files from Home Assistant
-          - Unrelated log files
-
-          ## Classification Criteria
-
-          **Log files from Z-Wave JS:**
-          Entries in these log files start with a date and time, a tag (typically DRIVER, CNTRLR, SERIAL and similar), optional direction arrows (» or «), and the actual log text.
-          In multiline logs, everything but the log text is replaced with spaces.
-
-          Here are some examples:
-          ```
-          2025-06-13 13:20:33.397 CNTRLR   Querying configured RF region...
-          2025-06-13 13:20:33.398 DRIVER » [REQ] [SerialAPISetup]
-                                            command: GetRFRegion
-          2025-06-13 13:20:33.398 SERIAL » 0x0104000b20d0                                                       (6 bytes)
-          2025-06-13 13:20:33.403 SERIAL « [ACK]                                                                   (0x06)
-          2025-06-13 13:20:33.403 SERIAL « 0x0105010b200bdb                                                     (7 bytes)
-          2025-06-13 13:20:33.404 SERIAL » [ACK]                                                                   (0x06)
-          2025-06-13 13:20:33.405 DRIVER « [RES] [SerialAPISetup]
-                                            command: GetRFRegion
-                                            region:  Europe (Long Range)
-          2025-06-13 13:20:33.406 CNTRLR   The controller is using RF region Europe (Long Range)
-          ```
-
-          To check if the log level is correct, look for lines containing `SERIAL »` and `SERIAL «`. Examples:
-          ```
-          2025-06-12 21:10:37.343 SERIAL » 0x01030015e9                                                         (5 bytes)
-          2025-06-12 21:10:37.344 SERIAL « [ACK]                                                                   (0x06)
-          2025-06-12 21:10:37.345 SERIAL « 0x011001155a2d5761766520362e3037000197                              (18 bytes)
-          2025-06-12 21:10:37.345 SERIAL » [ACK]                                                                   (0x06)
-          ```
-
-          If you find these lines, the log level is correct.
-
-          If you don't, the log level is most likely wrong.
-
-
-          **Log files from Z-Wave JS UI:**
-          Log entries from Z-Wave JS UI also start with the date and time, but are followed by the loglevel (INFO, DEBUG, ...), a tag (ZWAVE, GATEWAY, ...) and the log text. You will not find directional arrows in these logs.
-
-          Example:
-          ```
-          2021-08-04 15:56:59.250 INFO MQTT: MQTT is disabled
-          2021-08-04 15:56:59.503 INFO ZWAVE: Connecting to /dev/ttyACM0
-          2021-08-04 15:57:09.381 INFO ZWAVE: Zwave driver is ready
-          2021-08-04 15:57:09.387 INFO ZWAVE: Controller status: Driver ready
-          ```
-
-
-          **Log files from Home Assistant:**
-          These log entries look quite different from the ones created by Z-Wave JS and Z-Wave JS UI. You may find references to `zwave_js` or `zwave_js_server` in them. For example:
-          ```
-          2025-06-13 13:32:31.856 INFO (MainThread) [homeassistant.components.zwave_js] Zwave-js-server logging is enabled
-          2025-06-13 13:32:35.307 INFO (MainThread) [homeassistant.components.zwave_js] Disabling zwave_js server logging
-          2025-06-13 13:32:35.307 INFO (MainThread) [homeassistant.components.zwave_js] Server logging is currently set to LogLevel.DEBUG as a result of server logging being enabled. It is now being reset to LogLevel.INFO
-          2025-06-13 13:32:35.307 DEBUG (MainThread) [zwave_js_server] Publishing message:
-          {'command': 'driver.update_log_config',
-          'config': {'level': 'info'},
-          'messageId': '60b4ebdaa4da498daf6d960712163f7d'}
-          ```
-
-          These logs may be interleaved with logs from Z-Wave JS, see above. Check if this is the case and include it in your classification.
-
-
-          **Unrelated log files:**
-          Any other log files that do not match the above patterns are considered unrelated.
-
-
-          ## Rules
-
-          1. Compare the given log file against the classification criteria.
-          2. Respond with one of the following classifications:
-            - Z-Wave JS: correct log level
-            - Z-Wave JS: wrong log level
-            - Z-Wave JS UI
-            - Home Assistant: No Z-Wave JS
-            - Home Assistant: Includes Z-Wave JS
-            - Unrelated
-          3. If you are not sure about the classification (less than 75% certainty), return "Unknown".
-          4. Do not return anything else.
-
-        prompt: |
-          Analyze the following log file and classify it according to the rules above:
-
-          ```
-          ${{ steps.extract.outputs.result }}
-          ```
-
-        max-tokens: 100
-
-    - name: Give feedback
+    - name: Classify logfile and give feedback
       uses: actions/github-script@v9
       if: steps.extract.outputs.shouldContinue == 'true'
       id: feedback
       env:
-        AI_RESPONSE: ${{ steps.ai_detection.outputs.response }}
+        LOGFILE: ${{ steps.extract.outputs.result }}
       with:
         github-token: ${{secrets.BOT_TOKEN}}
         result-encoding: string
         script: |
-          const aiResponse = process.env.AI_RESPONSE;
-          console.log('Raw AI response:', JSON.stringify(aiResponse));
+          const bot = require(`${process.env.BOT_SCRIPTS_DIR}/index.cjs`);
+          const classification = bot.classifyLogfile(process.env.LOGFILE);
+          console.log('Classification:', classification);
 
-          let feedback = "UNKNOWN";
-          switch (aiResponse) {
-            case "Z-Wave JS: correct log level":
-              feedback = "OK";
-              break;
-            case "Z-Wave JS: wrong log level":
-              feedback = "WRONG_LOG_LEVEL";
-              break;
-            case "Z-Wave JS UI":
-              feedback = "Z_UI";
-              break;
-            case "Home Assistant: No Z-Wave JS":
-              feedback = "HA_ONLY";
-              break;
-            case "Home Assistant: Includes Z-Wave JS":
-              feedback = "OK";
-              break;
-            case "Unrelated":
-              feedback = "UNRELATED";
-              break;
-          }
-
-          const bot = require(`${process.env.GITHUB_WORKSPACE}/.github/bot-scripts/index.cjs`);
+          const feedback = bot.classificationToFeedback(classification);
           return bot.ensureLogfileFeedback({github, context}, feedback);
 
-  # Answer questions that are covered by the documentation and/or
-  # suggest similar existing posts. Maintainer and bot exclusions are
-  # derived from users.cjs inside answerFromDocs.cjs.
-  answer-from-docs:
+  # Collapse the bot comments a transferred issue inherited from the repo
+  # it came from, they are about the wrong repository now
+  hide-transferred-comments:
     runs-on: [ubuntu-latest]
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      models: read
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+
     steps:
     - name: Checkout master branch
       uses: actions/checkout@v7
 
-    - name: Restore docs index
-      id: restore-index
-      uses: actions/cache/restore@v6
-      with:
-        path: .docs-index
-        key: docs-embeddings-v2-${{ hashFiles('docs/**/*.md', '.github/bot-scripts/buildDocsIndex.cjs', '.github/bot-scripts/docsIndex.cjs', '.github/bot-scripts/modelsApi.cjs') }}
-        restore-keys: |
-          docs-embeddings-v2-
-
-    - name: Restore posts index
-      id: restore-posts-index
-      uses: actions/cache/restore@v6
-      with:
-        path: .posts-index
-        # There is no exact key to match, the newest index is picked
-        # via the prefix
-        key: posts-embeddings-v1-
-        restore-keys: |
-          posts-embeddings-v1-
-
-    # Downvoted answers collected by the docs-embeddings workflow.
-    # A missing cache just means no suppression is applied.
-    - name: Restore answer feedback
-      uses: actions/cache/restore@v6
-      with:
-        path: .docs-feedback/feedback.json
-        key: docs-feedback-v1-
-        restore-keys: |
-          docs-feedback-v1-
-
-    - name: Warn if neither index is available
-      if: steps.restore-index.outputs.cache-matched-key == '' && steps.restore-posts-index.outputs.cache-matched-key == ''
+    - name: Hide inherited bot comments
       uses: actions/github-script@v9
       with:
-        script: |
-          core.warning('Neither the docs index nor the posts index cache is available yet - skipping the docs answer bot for this post.');
-
-    - name: Answer from documentation
-      if: steps.restore-index.outputs.cache-matched-key != '' || steps.restore-posts-index.outputs.cache-matched-key != ''
-      uses: actions/github-script@v9
-      env:
-        MODELS_TOKEN: ${{ github.token }}
-        DOCS_INDEX_PATH: .docs-index/index.json
-        POSTS_INDEX_PATH: .posts-index/index.json
-        DOCS_FEEDBACK_PATH: .docs-feedback/feedback.json
-      with:
-        github-token: ${{ secrets.BOT_TOKEN }}
+        github-token: ${{secrets.BOT_TOKEN}}
         script: |
           const bot = require(`${process.env.GITHUB_WORKSPACE}/.github/bot-scripts/index.cjs`);
-          await bot.answerFromDocs({github, context});
+          await bot.hideTransferredComments({github, context});
 
   # Add the new post to the posts index, so it can be suggested as a
   # related post before the next nightly rebuild.
   # Edits are reconciled by the nightly rebuild instead, so repeated
-  # edits cannot burn Models API requests and cache storage.
+  # edits cannot burn compute and cache storage.
   update-posts-index:
     runs-on: [ubuntu-latest]
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
-      models: read
     if: github.event.action == 'opened' || github.event.action == 'created'
 
     steps:
     - name: Checkout master branch
       uses: actions/checkout@v7
 
+    # Restoring from the artifact and re-saving the cache below is also how an
+    # evicted cache entry heals itself between two nightly rebuilds
     - name: Restore posts index
-      id: restore-posts-index
-      uses: actions/cache/restore@v6
+      id: posts-index
+      uses: zwave-js/bot-workflows/actions/restore-bot-index@v1
       with:
-        path: .posts-index
-        # There is no exact key to match, the newest index is picked
-        # via the prefix
-        key: posts-embeddings-v1-
-        restore-keys: |
-          posts-embeddings-v1-
+        index: posts
+        github-token: ${{ github.token }}
+
+    - name: Warn if no posts index is available
+      if: steps.posts-index.outputs.found != 'true'
+      run: |
+        echo "::warning::The posts index could not be restored, from cache or from artifacts - this post will only be indexed by the next nightly rebuild"
+
+    # Installs the shared bot-scripts dependencies (including the local
+    # embedding model cache) and exports BOT_SCRIPTS_DIR
+    - name: Setup bot scripts
+      if: steps.posts-index.outputs.found == 'true'
+      uses: zwave-js/bot-workflows/actions/setup-bot@v1
 
     - name: Add post to index
       id: update
-      if: steps.restore-posts-index.outputs.cache-matched-key != ''
+      if: steps.posts-index.outputs.found == 'true'
       uses: actions/github-script@v9
       env:
-        MODELS_TOKEN: ${{ github.token }}
         POSTS_INDEX_PATH: .posts-index/index.json
       with:
         script: |
-          const bot = require(`${process.env.GITHUB_WORKSPACE}/.github/bot-scripts/index.cjs`);
+          const bot = require(`${process.env.BOT_SCRIPTS_DIR}/index.cjs`);
           return bot.updatePostsIndex({github, context});
 
-    - name: Warn if no posts index is available
-      if: steps.restore-posts-index.outputs.cache-matched-key == ''
-      uses: actions/github-script@v9
-      with:
-        script: |
-          core.warning('No posts index cache is available yet - skipping the incremental posts index update for this post.');
-
+    # Save under the same version-derived prefix the producers use
     - name: Save posts index
       if: steps.update.outputs.result == 'true'
       uses: actions/cache/save@v6
       with:
         path: .posts-index
-        key: posts-embeddings-v1-${{ github.run_id }}
+        key: ${{ steps.posts-index.outputs.prefix }}${{ github.run_id }}

@@ -541,9 +541,7 @@ interface FileSystem {
 	writeFile(
 		file: string,
 		data: string | BytesView,
-		options?:
-			| { encoding: BufferEncoding }
-			| BufferEncoding,
+		options?: { encoding: BufferEncoding } | BufferEncoding,
 	): Promise<void>;
 	readFile(file: string, encoding: BufferEncoding): Promise<string>;
 	pathExists(path: string): Promise<boolean>;
@@ -805,16 +803,16 @@ Configures how `driver.sendCommand` deals with supervised commands. It is an obj
 ```ts
 type SupervisionResult =
 	| {
-		status:
-			| SupervisionStatus.NoSupport
-			| SupervisionStatus.Fail
-			| SupervisionStatus.Success;
-		remainingDuration?: undefined;
-	}
+			status:
+				| SupervisionStatus.NoSupport
+				| SupervisionStatus.Fail
+				| SupervisionStatus.Success;
+			remainingDuration?: undefined;
+	  }
 	| {
-		status: SupervisionStatus.Working;
-		remainingDuration: Duration;
-	};
+			status: SupervisionStatus.Working;
+			remainingDuration: Duration;
+	  };
 ```
 
 ### `ZWaveOptions`
@@ -1245,6 +1243,12 @@ interface ZWaveOptions {
 		manufacturerId: number;
 		productType: number;
 		productId: number;
+		/**
+		 * A stable device identifier for Manufacturer Specific Device Specific Reports.
+		 * Strings are encoded as UTF-8. Uint8Arrays are encoded as binary.
+		 * The encoded identifier may be up to 31 bytes.
+		 */
+		deviceId?: string | Uint8Array;
 
 		/** The version of the hardware the application is running on. Can be omitted if unknown. */
 		hardwareVersion?: number;

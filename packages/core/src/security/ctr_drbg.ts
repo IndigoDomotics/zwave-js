@@ -4,6 +4,7 @@
 // The used crypto primitives are async, so the methods in this implementation are async as well
 
 import type { BytesView } from "@zwave-js/shared";
+
 import { encryptAES128ECB } from "../crypto/index.js";
 import { increment, xor } from "../crypto/shared.js";
 
@@ -68,8 +69,11 @@ export class CtrDRBG {
 			temp = xor(temp, providedData);
 		}
 
-		this.key = temp.subarray(0, KEY_LEN);
-		this.v = temp.subarray(KEY_LEN);
+		// Copy instead of taking views into temp, so key and v have distinct backing
+		// buffers. Some runtimes make a buffer temporarily immutable while an async
+		// WebCrypto call reads from any view of it, which would then fail for the other
+		this.key = temp.slice(0, KEY_LEN);
+		this.v = temp.slice(KEY_LEN);
 	}
 
 	public async generate(len: number): Promise<BytesView> {

@@ -1,6 +1,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+
 import type { SemanticSearchService } from "../semantic/service.js";
 import type { ToolHandler } from "../types.js";
+
 import { clampLimit, invalidArgument, jsonResult } from "./results.js";
 import { handleSemanticError } from "./semanticErrors.js";
 
@@ -66,6 +68,12 @@ export function createFindSimilarParametersTool(
 			+ "model; the response may report "
 			+ "model_download_consent_required instead of results if the local "
 			+ "model needs a one-time download that the client cannot confirm.",
+		annotations: {
+			readOnlyHint: true,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: true,
+		},
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -86,7 +94,7 @@ export function createFindSimilarParametersTool(
 				firmwareVersion: {
 					type: "string",
 					description:
-						"Optional firmware version (e.g. \"1.5\") to disambiguate "
+						'Optional firmware version (e.g. "1.5") to disambiguate '
 						+ "which $if-conditional variant of the parameter to use "
 						+ "as the query, fully evaluating conditionals the same "
 						+ "way resolve_config_param does",

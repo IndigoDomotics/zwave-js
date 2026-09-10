@@ -1,14 +1,10 @@
-import type { Message } from "./Message.js";
-
 /** Should be implemented by Serial API responses and callbacks which indicate success of the operation */
 export interface SuccessIndicator {
 	/** Whether the operation was successful */
 	isOK(): boolean;
 }
 
-export function isSuccessIndicator<T extends Message>(
-	msg: T,
-): msg is T & SuccessIndicator {
+export function isSuccessIndicator<T>(msg: T): msg is T & SuccessIndicator {
 	return typeof (msg as any).isOK === "function";
 }
 
@@ -20,8 +16,6 @@ export interface MultiStageCallback {
 	isFinal(): boolean;
 }
 
-export function isMultiStageCallback<T extends Message>(
-	msg: T,
-): msg is T & MultiStageCallback {
+export function isMultiStageCallback<T>(msg: T): msg is T & MultiStageCallback {
 	return typeof (msg as any).isFinal === "function";
 }

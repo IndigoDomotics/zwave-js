@@ -14,6 +14,10 @@
 		"min": "0.0",
 		"max": "255.255"
 	},
+	"endpoints": {
+		"1": { "label": "Switch 1" },
+		"2": { "label": "Switch 2" }
+	},
 	"paramInformation": [
 		{
 			"#": "1",
@@ -83,10 +87,7 @@
 			"label": "Watts Auto-Report Period",
 			"valueSize": 2,
 			"unit": "seconds",
-			"allowed": [
-				{ "value": 0 },
-				{ "range": [60, 32767] }
-			],
+			"allowed": [{ "value": 0 }, { "range": [60, 32767] }],
 			"defaultValue": 300,
 			"options": [
 				{
@@ -100,10 +101,7 @@
 			"label": "Kwh Auto-Report Period",
 			"valueSize": 2,
 			"unit": "seconds",
-			"allowed": [
-				{ "value": 0 },
-				{ "range": [60, 32767] }
-			],
+			"allowed": [{ "value": 0 }, { "range": [60, 32767] }],
 			"defaultValue": 3600,
 			"options": [
 				{

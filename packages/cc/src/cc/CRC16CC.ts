@@ -11,8 +11,14 @@ import {
 	type WithAddress,
 	validatePayload,
 } from "@zwave-js/core";
+import { Bytes } from "@zwave-js/shared";
+
 import { CCAPI } from "../lib/API.js";
-import { type CCRaw, CommandClass } from "../lib/CommandClass.js";
+import {
+	type CCRaw,
+	CommandClass,
+	CommandRelation,
+} from "../lib/CommandClass.js";
 import {
 	API,
 	CCCommand,
@@ -20,8 +26,6 @@ import {
 	expectedCCResponse,
 	implementedVersion,
 } from "../lib/CommandClassDecorators.js";
-
-import { Bytes } from "@zwave-js/shared";
 import { CRC16Command } from "../lib/_Types.js";
 import type { CCEncodingContext, CCParsingContext } from "../lib/traits.js";
 
@@ -76,9 +80,7 @@ export class CRC16CC extends CommandClass {
 	}
 
 	/** Encapsulates a command in a CRC-16 CC */
-	public static encapsulate(
-		cc: CommandClass,
-	): CRC16CCCommandEncapsulation {
+	public static encapsulate(cc: CommandClass): CRC16CCCommandEncapsulation {
 		const ret = new CRC16CCCommandEncapsulation({
 			nodeId: cc.nodeId,
 			encapsulated: cc,
@@ -86,8 +88,8 @@ export class CRC16CC extends CommandClass {
 
 		// Copy the encapsulation flags from the encapsulated command
 		// but omit CRC-16, since we're doing that right now
-		ret.encapsulationFlags = cc.encapsulationFlags
-			& ~EncapsulationFlags.CRC16;
+		ret.encapsulationFlags =
+			cc.encapsulationFlags & ~EncapsulationFlags.CRC16;
 
 		return ret;
 	}
@@ -132,9 +134,7 @@ export class CRC16CCCommandEncapsulation extends CRC16CC {
 		// Verify the CRC
 		let expectedCRC = CRC16_CCITT(headerBuffer);
 		expectedCRC = CRC16_CCITT(ccBuffer, expectedCRC);
-		const actualCRC = raw.payload.readUInt16BE(
-			raw.payload.length - 2,
-		);
+		const actualCRC = raw.payload.readUInt16BE(raw.payload.length - 2);
 		validatePayload(expectedCRC === actualCRC);
 
 		const encapsulated = await CommandClass.parse(ccBuffer, ctx);
@@ -145,6 +145,13 @@ export class CRC16CCCommandEncapsulation extends CRC16CC {
 	}
 
 	public encapsulated: CommandClass;
+
+	protected override determineRelation(other: CommandClass): CommandRelation {
+		if (other instanceof CRC16CCCommandEncapsulation) {
+			return this.encapsulated.getRelationTo(other.encapsulated);
+		}
+		return CommandRelation.Unrelated;
+	}
 
 	public async serialize(ctx: CCEncodingContext): Promise<Bytes> {
 		const commandBuffer = await this.encapsulated.serialize(ctx);

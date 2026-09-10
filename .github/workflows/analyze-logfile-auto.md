@@ -10,16 +10,23 @@ on:
   reaction: none
   steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7.0.1
+      with:
+        # This pre-activation job runs third-party packages; don't persist the
+        # workflow token in .git for them to read
+        persist-credentials: false
+
+    - name: Setup bot scripts
+      uses: zwave-js/bot-workflows/actions/setup-bot@v1
 
     - name: Extract log file from discussion body
-      uses: actions/github-script@v9
+      uses: actions/github-script@v9.0.0
       id: extract
       with:
         github-token: ${{ secrets.BOT_TOKEN }}
         result-encoding: string
         script: |
-          const bot = require(`${process.env.GITHUB_WORKSPACE}/.github/bot-scripts/index.cjs`);
+          const bot = require(`${process.env.BOT_SCRIPTS_DIR}/index.cjs`);
           const extractResult = await bot.extractLogfileInDiscussion({github, context});
 
           if (!extractResult) {
@@ -37,112 +44,11 @@ on:
           core.setOutput("shouldContinue", "true");
           return extractResult;
 
-    - name: Classify logfile using AI
-      id: ai_detection
-      if: steps.extract.outputs.shouldContinue == 'true'
-      uses: actions/ai-inference@v2.1.1
-      with:
-        model: openai/gpt-4o-mini
-        system-prompt: |
-          You are a log file classifier for the Z-Wave JS project. Your task is to classify log files that users have uploaded, and check whether they uploaded the correct log files with the correct log level ("debug"). The log files you will typically encounter can be divided into the following groups:
-
-          - Log files from Z-Wave JS with the correct log level
-          - Log files from Z-Wave JS with the wrong log level
-          - Log files from Z-Wave JS UI
-          - Log files from Home Assistant
-          - Unrelated log files
-
-          ## Classification Criteria
-
-          **Log files from Z-Wave JS:**
-          Entries in these log files start with a date and time, a tag (typically DRIVER, CNTRLR, SERIAL and similar), optional direction arrows (» or «), and the actual log text.
-          In multiline logs, everything but the log text is replaced with spaces.
-
-          Here are some examples:
-          ```
-          2025-06-13 13:20:33.397 CNTRLR   Querying configured RF region...
-          2025-06-13 13:20:33.398 DRIVER » [REQ] [SerialAPISetup]
-                                            command: GetRFRegion
-          2025-06-13 13:20:33.398 SERIAL » 0x0104000b20d0                                                       (6 bytes)
-          2025-06-13 13:20:33.403 SERIAL « [ACK]                                                                   (0x06)
-          2025-06-13 13:20:33.403 SERIAL « 0x0105010b200bdb                                                     (7 bytes)
-          2025-06-13 13:20:33.404 SERIAL » [ACK]                                                                   (0x06)
-          2025-06-13 13:20:33.405 DRIVER « [RES] [SerialAPISetup]
-                                            command: GetRFRegion
-                                            region:  Europe (Long Range)
-          2025-06-13 13:20:33.406 CNTRLR   The controller is using RF region Europe (Long Range)
-          ```
-
-          To check if the log level is correct, look for lines containing `SERIAL »` and `SERIAL «`. Examples:
-          ```
-          2025-06-12 21:10:37.343 SERIAL » 0x01030015e9                                                         (5 bytes)
-          2025-06-12 21:10:37.344 SERIAL « [ACK]                                                                   (0x06)
-          2025-06-12 21:10:37.345 SERIAL « 0x011001155a2d5761766520362e3037000197                              (18 bytes)
-          2025-06-12 21:10:37.345 SERIAL » [ACK]                                                                   (0x06)
-          ```
-
-          If you find these lines, the log level is correct.
-
-          If you don't, the log level is most likely wrong.
-
-
-          **Log files from Z-Wave JS UI:**
-          Log entries from Z-Wave JS UI also start with the date and time, but are followed by the loglevel (INFO, DEBUG, ...), a tag (ZWAVE, GATEWAY, ...) and the log text. You will not find directional arrows in these logs.
-
-          Example:
-          ```
-          2021-08-04 15:56:59.250 INFO MQTT: MQTT is disabled
-          2021-08-04 15:56:59.503 INFO ZWAVE: Connecting to /dev/ttyACM0
-          2021-08-04 15:57:09.381 INFO ZWAVE: Zwave driver is ready
-          2021-08-04 15:57:09.387 INFO ZWAVE: Controller status: Driver ready
-          ```
-
-
-          **Log files from Home Assistant:**
-          These log entries look quite different from the ones created by Z-Wave JS and Z-Wave JS UI. You may find references to `zwave_js` or `zwave_js_server` in them. For example:
-          ```
-          2025-06-13 13:32:31.856 INFO (MainThread) [homeassistant.components.zwave_js] Zwave-js-server logging is enabled
-          2025-06-13 13:32:35.307 INFO (MainThread) [homeassistant.components.zwave_js] Disabling zwave_js server logging
-          2025-06-13 13:32:35.307 INFO (MainThread) [homeassistant.components.zwave_js] Server logging is currently set to LogLevel.DEBUG as a result of server logging being enabled. It is now being reset to LogLevel.INFO
-          2025-06-13 13:32:35.307 DEBUG (MainThread) [zwave_js_server] Publishing message:
-          {'command': 'driver.update_log_config',
-          'config': {'level': 'info'},
-          'messageId': '60b4ebdaa4da498daf6d960712163f7d'}
-          ```
-
-          These logs may be interleaved with logs from Z-Wave JS, see above. Check if this is the case and include it in your classification.
-
-
-          **Unrelated log files:**
-          Any other log files that do not match the above patterns are considered unrelated.
-
-
-          ## Rules
-
-          1. Compare the given log file against the classification criteria.
-          2. Respond with one of the following classifications:
-            - Z-Wave JS: correct log level
-            - Z-Wave JS: wrong log level
-            - Z-Wave JS UI
-            - Home Assistant: No Z-Wave JS
-            - Home Assistant: Includes Z-Wave JS
-            - Unrelated
-          3. If you are not sure about the classification (less than 75% certainty), return "Unknown".
-          4. Do not return anything else.
-        prompt: |
-          Analyze the following log file and classify it according to the rules above:
-
-          ```
-          ${{ steps.extract.outputs.result }}
-          ```
-
-        max-tokens: 100
-
-    - name: Give feedback
-      uses: actions/github-script@v9
+    - name: Classify logfile and give feedback
+      uses: actions/github-script@v9.0.0
       id: feedback
       env:
-        AI_RESPONSE: ${{ steps.ai_detection.outputs.response }}
+        LOGFILE: ${{ steps.extract.outputs.result }}
         SHOULD_CONTINUE: ${{ steps.extract.outputs.shouldContinue }}
       with:
         github-token: ${{ secrets.BOT_TOKEN }}
@@ -150,32 +56,11 @@ on:
         script: |
           if (process.env.SHOULD_CONTINUE !== "true") return "SKIP";
 
-          const aiResponse = process.env.AI_RESPONSE;
-          console.log('Raw AI response:', JSON.stringify(aiResponse));
+          const bot = require(`${process.env.BOT_SCRIPTS_DIR}/index.cjs`);
+          const classification = bot.classifyLogfile(process.env.LOGFILE);
+          console.log('Classification:', classification);
 
-          let feedback = "UNKNOWN";
-          switch (aiResponse) {
-            case "Z-Wave JS: correct log level":
-              feedback = "OK";
-              break;
-            case "Z-Wave JS: wrong log level":
-              feedback = "WRONG_LOG_LEVEL";
-              break;
-            case "Z-Wave JS UI":
-              feedback = "Z_UI";
-              break;
-            case "Home Assistant: No Z-Wave JS":
-              feedback = "HA_ONLY";
-              break;
-            case "Home Assistant: Includes Z-Wave JS":
-              feedback = "OK";
-              break;
-            case "Unrelated":
-              feedback = "UNRELATED";
-              break;
-          }
-
-          const bot = require(`${process.env.GITHUB_WORKSPACE}/.github/bot-scripts/index.cjs`);
+          const feedback = bot.classificationToFeedback(classification);
           await bot.ensureLogfileFeedbackInDiscussion({github, context}, feedback);
 
           return feedback;
@@ -188,7 +73,6 @@ on:
       run: "true"
   permissions:
     contents: read
-    models: read
     discussions: write
 
 # Only run the (expensive) agentic analysis when the pre-checks confirmed
@@ -199,43 +83,47 @@ permissions:
   contents: read
   discussions: read
 
-engine:
-  id: copilot
+# The logfile extraction in the pre-activation job needs a full runner
+# image for corepack/yarn
+runs-on-slim: ubuntu-latest
+
+engine: copilot
 
 imports:
-  - shared/zwave-log-analysis.md
+  - zwave-js/bot-workflows/workflows/shared/hardening.md@75148e07b701ca92e052212a9b7710864068ef6e
+  - zwave-js/bot-workflows/workflows/shared/zwave-log-analysis.md@0fedb405bbe6acb4060d6e31f547994b28892866
 
 steps:
-  - name: Checkout repository
-    uses: actions/checkout@v6
-    with:
-      persist-credentials: false
+  - name: Setup bot scripts
+    uses: zwave-js/bot-workflows/actions/setup-bot@v1
 
   - name: Get logfile URL from discussion
     id: get_logfile_url
-    uses: actions/github-script@v9
+    uses: actions/github-script@v9.0.0
     with:
       github-token: ${{ secrets.BOT_TOKEN }}
       result-encoding: string
       script: |
-        const bot = require(`${process.env.GITHUB_WORKSPACE}/.github/bot-scripts/index.cjs`);
+        const bot = require(`${process.env.BOT_SCRIPTS_DIR}/index.cjs`);
         return bot.extractLogfileUrlFromDiscussion({github, context});
 
   - name: Download logfile
-    env:
-      LOGFILE_URL: ${{ steps.get_logfile_url.outputs.result }}
-    run: |
-      mkdir -p /tmp/gh-aw/agent
-      curl -fsSL --max-filesize 52428800 --connect-timeout 15 --max-time 120 --retry 3 --retry-delay 2 -o /tmp/gh-aw/agent/logfile.log "$LOGFILE_URL"
-      wc -l /tmp/gh-aw/agent/logfile.log
+    uses: zwave-js/bot-workflows/actions/download-logfile@v1
+    with:
+      url: ${{ steps.get_logfile_url.outputs.result }}
 
 safe-outputs:
   add-comment:
     discussions: true
+    # Post as the bot account like the other bot comments
+    github-token: ${{ secrets.BOT_TOKEN }}
 
+# Network stays open: the log-analyzer MCP server is fetched with npx at
+# startup, and the logfile is downloaded in a step above
 network: defaults
 
 timeout-minutes: 30
+source: zwave-js/bot-workflows/workflows/analyze-logfile-auto.md@43d9dd67ab9c49d08c85002b35b6a02f300dde2f
 ---
 
 # Z-Wave JS Logfile Analysis
@@ -246,8 +134,10 @@ This is the discussion content (sanitized):
 
 "${{ steps.sanitized.outputs.text }}"
 
-Determine the user's question or problem from the discussion content. If no specific question can be identified, analyze the log for any issues, errors, or notable events that could explain the problem described in the discussion.
+Determine what the user wants to know. The discussion follows a support template, so the problem is described in prose spread over sections like "Describe the issue", "Steps to reproduce the behavior" and "Device information". Read all of them. The description of what happens and what the user expected instead is the question to answer, even when the body contains no question mark and nothing phrased as a question. When a node ID is given, the problem is about that node. Screenshots are not available to you, so rely on the surrounding text.
+
+Only when the discussion describes no concrete symptom at all, report the most severe problems you find in the log instead.
 
 Load the logfile with the `loadLogFile` tool, then analyze it thoroughly following your analysis instructions to answer the user's question.
 
-Finally, post your findings as a comment on the discussion using the `add-comment` safe output.
+Finally, post your findings as a comment on the discussion using the `add_comment` safe output. You MUST pass `item_number: ${{ github.event.discussion.number }}` explicitly — automatic targeting does not work in this workflow.

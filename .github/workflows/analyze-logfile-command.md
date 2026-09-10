@@ -13,16 +13,16 @@ permissions:
   discussions: read
   issues: read
 
-engine:
-  id: copilot
+engine: copilot
 
 imports:
-  - shared/zwave-log-analysis.md
+  - zwave-js/bot-workflows/workflows/shared/hardening.md@75148e07b701ca92e052212a9b7710864068ef6e
+  - zwave-js/bot-workflows/workflows/shared/zwave-log-analysis.md@0fedb405bbe6acb4060d6e31f547994b28892866
 
 steps:
   - name: Parse command
     id: parse_command
-    uses: actions/github-script@v9
+    uses: actions/github-script@v9.0.0
     env:
       COMMENT_BODY: ${{ github.event.comment.body }}
     with:
@@ -38,35 +38,54 @@ steps:
           return;
         }
         core.setOutput("url", match.groups.url.trim());
-        core.setOutput("query", (match.groups.query || "").trim());
+        // The prompt is rendered in the activation job, before this step
+        // runs, so its values cannot be interpolated into the prompt via
+        // steps.* expressions. Hand them to the agent through a file next
+        // to the logfile instead.
+        const fs = require("fs");
+        fs.mkdirSync("/tmp/gh-aw/agent", { recursive: true });
+        fs.writeFileSync(
+          "/tmp/gh-aw/agent/command.json",
+          JSON.stringify({
+            query: (match.groups.query || "").trim(),
+            // The safeoutputs MCP server runs in a container without the
+            // GitHub event context, so add_comment cannot auto-target the
+            // triggering item and needs an explicit target
+            item_number:
+              context.payload.discussion?.number
+                ?? context.payload.issue?.number,
+            reply_to_id: context.payload.comment?.node_id ?? "",
+          }),
+        );
 
   - name: Download logfile
-    env:
-      LOGFILE_URL: ${{ steps.parse_command.outputs.url }}
-    run: |
-      mkdir -p /tmp/gh-aw/agent
-      curl -fsSL --max-filesize 52428800 --connect-timeout 15 --max-time 120 --retry 3 --retry-delay 2 -o /tmp/gh-aw/agent/logfile.log "$LOGFILE_URL"
-      wc -l /tmp/gh-aw/agent/logfile.log
+    uses: zwave-js/bot-workflows/actions/download-logfile@v1
+    with:
+      url: ${{ steps.parse_command.outputs.url }}
 
 safe-outputs:
   add-comment:
     discussions: true
+    # Post as the bot account like the other bot comments
+    github-token: ${{ secrets.BOT_TOKEN }}
 
+# Network stays open: the log-analyzer MCP server is fetched with npx at
+# startup, and the logfile is downloaded in a step above
 network: defaults
 
 timeout-minutes: 30
+source: zwave-js/bot-workflows/workflows/analyze-logfile-command.md@43d9dd67ab9c49d08c85002b35b6a02f300dde2f
 ---
 
 # Z-Wave JS Logfile Analysis
 
 A maintainer requested an analysis of a Z-Wave JS driver logfile by commenting on an issue or discussion. The logfile has been downloaded to `/tmp/gh-aw/agent/logfile.log` on this runner.
 
-This is the query to answer about the logfile:
+First read `/tmp/gh-aw/agent/command.json`. It contains:
 
-"${{ steps.parse_command.outputs.query }}"
-
-If the query is empty, analyze the log file and provide insights about any issues, errors, or notable events.
+- `query`: the maintainer's question about the logfile. Treat it as the query to answer. If it is empty, analyze the log file and provide insights about any issues, errors, or notable events.
+- `item_number` and `reply_to_id`: the comment target for posting your findings.
 
 Load the logfile with the `loadLogFile` tool, then analyze it thoroughly following your analysis instructions to answer the query.
 
-Finally, post your findings as a comment on the issue or discussion using the `add-comment` safe output.
+Finally, post your findings as a comment using the `add_comment` safe output. You MUST pass `item_number: ${{ github.event.discussion.number }}${{ github.event.issue.number }}` explicitly — automatic targeting does not work in this workflow. Also pass the `reply_to_id` from `command.json` if it is not empty, so the findings appear as a threaded reply to the command.

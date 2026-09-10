@@ -2,6 +2,7 @@
 
 /// <reference path="types.d.ts" />
 
+const { config } = require("./config.cjs");
 const {
 	AUTO_ANALYSIS_COMMENT_TAG,
 	AUTO_ANALYSIS_START_TAG,
@@ -48,8 +49,7 @@ async function main(param) {
 
 		// Create a new issue referencing the original discussion using GitHub's template
 		const issueTitle = context.payload.discussion.title;
-		const issueBody =
-			`### Discussed in https://github.com/${context.repo.owner}/${context.repo.repo}/discussions/${context.payload.discussion.number}
+		const issueBody = `### Discussed in https://github.com/${context.repo.owner}/${context.repo.repo}/discussions/${context.payload.discussion.number}
 
 <div type='discussions-op-text'>
 
@@ -186,10 +186,10 @@ async function findBotAnalysisComment(github, context) {
 		const queryResult = await github.graphql(queryComments, queryVars);
 		const comments = queryResult.repository.discussion.comments.nodes;
 
-		// Find the comment from zwave-js-bot that contains the AUTO_ANALYSIS_COMMENT_TAG
+		// Find the bot comment that contains the AUTO_ANALYSIS_COMMENT_TAG
 		const botComment = comments.find(
 			(c) =>
-				c.author.login === "zwave-js-bot"
+				c.author.login === config.bot.login
 				&& c.body.includes(AUTO_ANALYSIS_COMMENT_TAG),
 		);
 

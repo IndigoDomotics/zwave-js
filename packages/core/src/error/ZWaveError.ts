@@ -71,6 +71,9 @@ export enum ZWaveErrorCodes {
 	/** Tried to perform an action for a Long Range node that does not make sense for ZWLR */
 	Controller_NotSupportedForLongRange,
 
+	/** A newer command superseded this one */
+	Controller_MessageSuperseded,
+
 	/** Could not fetch some information to determine firmware upgrades from a node */
 	FWUpdateService_MissingInformation = 260,
 	/** Any error related to HTTP requests during firmware update communication */
@@ -296,44 +299,41 @@ export function isRecoverableZWaveError(e: unknown): e is ZWaveError & {
 	return false;
 }
 
-export function isMissingControllerACK(
-	e: unknown,
-): e is ZWaveError & {
+export function isMissingControllerACK(e: unknown): e is ZWaveError & {
 	code: ZWaveErrorCodes.Controller_Timeout;
 	context: "ACK";
 } {
-	return isZWaveError(e)
+	return (
+		isZWaveError(e)
 		&& e.code === ZWaveErrorCodes.Controller_Timeout
-		&& e.context === "ACK";
+		&& e.context === "ACK"
+	);
 }
 
-export function wasControllerReset(
-	e: unknown,
-): e is ZWaveError & {
+export function wasControllerReset(e: unknown): e is ZWaveError & {
 	code: ZWaveErrorCodes.Controller_Reset;
 } {
-	return isZWaveError(e)
-		&& e.code === ZWaveErrorCodes.Controller_Reset;
+	return isZWaveError(e) && e.code === ZWaveErrorCodes.Controller_Reset;
 }
 
-export function isMissingControllerResponse(
-	e: unknown,
-): e is ZWaveError & {
+export function isMissingControllerResponse(e: unknown): e is ZWaveError & {
 	code: ZWaveErrorCodes.Controller_Timeout;
 	context: "response";
 } {
-	return isZWaveError(e)
+	return (
+		isZWaveError(e)
 		&& e.code === ZWaveErrorCodes.Controller_Timeout
-		&& e.context === "response";
+		&& e.context === "response"
+	);
 }
 
-export function isMissingControllerCallback(
-	e: unknown,
-): e is ZWaveError & {
+export function isMissingControllerCallback(e: unknown): e is ZWaveError & {
 	code: ZWaveErrorCodes.Controller_Timeout;
 	context: "callback";
 } {
-	return isZWaveError(e)
+	return (
+		isZWaveError(e)
 		&& e.code === ZWaveErrorCodes.Controller_Timeout
-		&& e.context === "callback";
+		&& e.context === "callback"
+	);
 }

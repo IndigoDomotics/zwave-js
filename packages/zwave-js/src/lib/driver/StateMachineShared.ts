@@ -7,24 +7,28 @@ import {
 import type { Message } from "@zwave-js/serial";
 import {
 	SendDataBridgeRequest,
-	type SendDataBridgeRequestTransmitReport,
+	SendDataBridgeRequestTransmitReport,
 	SendDataMulticastBridgeRequest,
-	type SendDataMulticastBridgeRequestTransmitReport,
+	SendDataMulticastBridgeRequestTransmitReport,
 	SendDataMulticastRequest,
-	type SendDataMulticastRequestTransmitReport,
+	SendDataMulticastRequestTransmitReport,
 	SendDataRequest,
-	type SendDataRequestTransmitReport,
+	SendDataRequestTransmitReport,
 	isSendData,
 	isSendDataTransmitReport,
 } from "@zwave-js/serial/serialapi";
 import { getEnumMemberName } from "@zwave-js/shared";
-import type { SerialAPICommandMachineFailure } from "./SerialAPICommandMachine.js";
+
+import type {
+	SerialAPICommand,
+	SerialAPICommandMachineFailure,
+} from "./SerialAPICommandMachine.js";
 import type { Transaction } from "./Transaction.js";
 
-export function serialAPICommandErrorToZWaveError(
-	reason: SerialAPICommandMachineFailure["reason"],
-	sentMessage: Message,
-	receivedMessage: Message | undefined,
+export function serialAPICommandErrorToZWaveError<T extends SerialAPICommand>(
+	reason: SerialAPICommandMachineFailure<T>["reason"],
+	sentMessage: T,
+	receivedMessage: T | undefined,
 	transactionSource: string | undefined,
 ): ZWaveError {
 	switch (reason) {
@@ -89,21 +93,18 @@ export function serialAPICommandErrorToZWaveError(
 			}
 
 			if (
-				sentMessage instanceof SendDataRequest
-				|| sentMessage instanceof SendDataBridgeRequest
+				(sentMessage instanceof SendDataRequest
+					|| sentMessage instanceof SendDataBridgeRequest)
+				&& (receivedMessage instanceof SendDataRequestTransmitReport
+					|| receivedMessage
+						instanceof SendDataBridgeRequestTransmitReport)
 			) {
-				const status = (
-					receivedMessage as
-						| SendDataRequestTransmitReport
-						| SendDataBridgeRequestTransmitReport
-				).transmitStatus;
+				const status = receivedMessage.transmitStatus;
 				return new ZWaveError(
-					`Failed to send the command (Status ${
-						getEnumMemberName(
-							TransmitStatus,
-							status,
-						)
-					})`,
+					`Failed to send the command (Status ${getEnumMemberName(
+						TransmitStatus,
+						status,
+					)})`,
 					status === TransmitStatus.NoAck
 						? ZWaveErrorCodes.Controller_CallbackNOK
 						: ZWaveErrorCodes.Controller_MessageDropped,
@@ -111,21 +112,19 @@ export function serialAPICommandErrorToZWaveError(
 					transactionSource,
 				);
 			} else if (
-				sentMessage instanceof SendDataMulticastRequest
-				|| sentMessage instanceof SendDataMulticastBridgeRequest
+				(sentMessage instanceof SendDataMulticastRequest
+					|| sentMessage instanceof SendDataMulticastBridgeRequest)
+				&& (receivedMessage
+					instanceof SendDataMulticastRequestTransmitReport
+					|| receivedMessage
+						instanceof SendDataMulticastBridgeRequestTransmitReport)
 			) {
-				const status = (
-					receivedMessage as
-						| SendDataMulticastRequestTransmitReport
-						| SendDataMulticastBridgeRequestTransmitReport
-				).transmitStatus;
+				const status = receivedMessage.transmitStatus;
 				return new ZWaveError(
-					`One or more nodes did not respond to the multicast request (Status ${
-						getEnumMemberName(
-							TransmitStatus,
-							status,
-						)
-					})`,
+					`One or more nodes did not respond to the multicast request (Status ${getEnumMemberName(
+						TransmitStatus,
+						status,
+					)})`,
 					status === TransmitStatus.NoAck
 						? ZWaveErrorCodes.Controller_CallbackNOK
 						: ZWaveErrorCodes.Controller_MessageDropped,
@@ -157,33 +156,33 @@ export function createMessageDroppedUnexpectedError(
 
 export type TransactionReducerResult =
 	| {
-		// Silently drop the transaction
-		type: "drop";
-	}
+			// Deferred transactions remain unsettled for requeue and teardown
+			type: "defer";
+	  }
 	| {
-		// Do nothing (useful especially for the current transaction)
-		type: "keep";
-	}
+			// Do nothing (useful especially for the current transaction)
+			type: "keep";
+	  }
 	| {
-		// Reject the transaction with the given error
-		type: "reject";
-		message: string;
-		code: ZWaveErrorCodes;
-	}
+			// Reject the transaction with the given error
+			type: "reject";
+			message: string;
+			code: ZWaveErrorCodes;
+	  }
 	| {
-		// Resolve the transaction with the given message
-		type: "resolve";
-		message?: Message;
-	}
+			// Resolve the transaction with the given message
+			type: "resolve";
+			message?: Message;
+	  }
 	| {
-		// Moves the transaction back to the queue, resetting it if desired.
-		// Optionally change the priority and/or tag.
-		type: "requeue";
-		// TODO: Figure out if there's any situation where we don't want to reset the transaction
-		reset?: boolean;
-		priority?: MessagePriority;
-		tag?: any;
-	};
+			// Moves the transaction back to the queue, resetting it if desired.
+			// Optionally change the priority and/or tag.
+			type: "requeue";
+			// TODO: Figure out if there's any situation where we don't want to reset the transaction
+			reset?: boolean;
+			priority?: MessagePriority;
+			tag?: any;
+	  };
 
 export type TransactionReducer = (
 	transaction: Transaction,

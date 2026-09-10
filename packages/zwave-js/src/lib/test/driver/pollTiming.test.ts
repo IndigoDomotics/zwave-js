@@ -1,8 +1,10 @@
+import path from "node:path";
+
 import { BasicCCGet, BasicCCReport } from "@zwave-js/cc";
 import { MessagePriority } from "@zwave-js/core";
 import { type MockNodeBehavior } from "@zwave-js/testing";
 import { wait } from "alcalzone-shared/async";
-import path from "node:path";
+
 import { integrationTest } from "../integrationTestSuite.js";
 
 integrationTest(
@@ -86,6 +88,9 @@ integrationTest(
 		testBody: async (t, _driver, node, _mockController, _mockNode) => {
 			const basicPoll = node.commandClasses.Basic.withOptions({
 				priority: MessagePriority.Poll,
+				// In normal operation, we want polls to be deduplicated too, but for these
+				// tests, we need each individual transaction
+				preventDeduplication: true,
 			});
 
 			// Queue all three without awaiting
@@ -249,6 +254,9 @@ integrationTest(
 		testBody: async (t, _driver, node, _mockController, mockNode) => {
 			const basicPoll = node.commandClasses.Basic.withOptions({
 				priority: MessagePriority.Poll,
+				// In normal operation, we want polls to be deduplicated too, but for these
+				// tests, we need each individual transaction
+				preventDeduplication: true,
 			});
 
 			// Disable auto-ACK now that the driver is fully initialized.

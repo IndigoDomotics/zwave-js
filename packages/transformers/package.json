@@ -1,6 +1,6 @@
 {
   "name": "@zwave-js/transformers",
-  "version": "15.24.2",
+  "version": "15.29.0",
   "description": "zwave-js: compile-time transformers",
   "private": true,
   "keywords": [],
@@ -46,8 +46,8 @@
     "del-cli": "^7.0.0",
     "nano-spawn": "^2.1.0",
     "ts-morph": "^28.0.0",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.1",
     "typescript": "6.0.3",
-    "vitest": "^4.1.0"
+    "vitest": "~4.0.18"
   }
 }

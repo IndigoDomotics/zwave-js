@@ -1,3 +1,5 @@
+import type { Timer } from "./Timers.js";
+
 /** Enforces that all of the required properties (optional properties may be omitted) or none of the properties exist */
 export type AllOrNone<T extends Record<string, any>> =
 	| T
@@ -11,10 +13,7 @@ export type Constructor<T = object> = new (...args: any[]) => T;
 
 export type TypedClassDecorator<
 	Class extends abstract new (...args: any) => any,
-> = (
-	target: Class,
-	context: ClassDecoratorContext<Class>,
-) => Class | void;
+> = (target: Class, context: ClassDecoratorContext<Class>) => Class | void;
 
 export type TypedPropertyDecorator<TTarget extends object> = <
 	T extends TTarget,
@@ -25,7 +24,8 @@ export type TypedPropertyDecorator<TTarget extends object> = <
 
 export type UnionToIntersection<T> = (
 	T extends any ? (x: T) => any : never
-) extends (x: infer R) => any ? R
+) extends (x: infer R) => any
+	? R
 	: never;
 
 export type OnlyMethods<T> = {
@@ -35,8 +35,18 @@ export type MethodsNamesOf<T> = OnlyMethods<T>[keyof T];
 
 export type IsAny<T> = 0 extends 1 & T ? true : false;
 
+/** A registration for something that is awaited out-of-band, e.g. an unsolicited message or command */
+export interface AwaitedThing<T> {
+	handler: (thing: T) => void;
+	timeout?: Timer;
+	predicate: (msg: T) => boolean;
+	refreshPredicate?: (msg: T) => boolean;
+	/** Whether a matching thing is consumed (default) or only observed. */
+	consume?: boolean;
+}
+
 // expands object types recursively
-// dprint-ignore
+// oxfmt-ignore
 export type Expand<T> =
 	// Expand object types
 	T extends object

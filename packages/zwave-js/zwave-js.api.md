@@ -22,6 +22,9 @@ import { CCAPIs } from '@zwave-js/cc';
 import { CCConstructor } from '@zwave-js/cc';
 import { CCId } from '@zwave-js/core';
 import { CCNameOrId } from '@zwave-js/cc';
+import { ChannelConfiguration } from '@zwave-js/core';
+import type { ChannelInfo } from '@zwave-js/serial';
+import { ChannelInfo as ChannelInfo_2 } from '@zwave-js/serial/rcp';
 import { CLIChunk } from '@zwave-js/serial';
 import { CommandClass } from '@zwave-js/cc';
 import { CommandClasses } from '@zwave-js/core';
@@ -45,7 +48,7 @@ import { ControlsCC } from '@zwave-js/core';
 import type { DatabaseFactory } from '@zwave-js/shared/bindings';
 import { DataDirection } from '@zwave-js/core';
 import { DataRate } from '@zwave-js/core';
-import type { DeepPartial } from '@zwave-js/shared';
+import { DeepPartial } from '@zwave-js/shared';
 import type { DeferredPromise } from 'alcalzone-shared/deferred-promise';
 import { DeviceConfig } from '@zwave-js/config';
 import type { DeviceID } from '@zwave-js/config';
@@ -56,7 +59,8 @@ import { EndpointId } from '@zwave-js/core';
 import { EntryControlDataTypes } from '@zwave-js/cc';
 import { EntryControlEventTypes } from '@zwave-js/cc';
 import type { EventListener } from '@zwave-js/shared';
-import type { Expand } from '@zwave-js/shared';
+import { Expand } from '@zwave-js/shared';
+import { ExplorerFrameCommand } from '@zwave-js/core';
 import { ExtendedNVMOperationsCommand } from '@zwave-js/serial/serialapi';
 import { extractFirmware } from '@zwave-js/core';
 import { FileSystem } from '@zwave-js/core';
@@ -80,10 +84,14 @@ import { GetAllEndpoints } from '@zwave-js/core';
 import { GetCCs } from '@zwave-js/core';
 import { GetEndpoint } from '@zwave-js/core';
 import { getEnumMemberName } from '@zwave-js/shared';
+import { GetFirmwareInfoRequest } from '@zwave-js/serial/rcp';
+import { GetFirmwareInfoResponse } from '@zwave-js/serial/rcp';
+import { GetFirmwareInfoResponseOptions } from '@zwave-js/serial/rcp';
 import { GraphNode } from '@zwave-js/core';
 import { guessFirmwareFileFormat } from '@zwave-js/core';
 import { InterviewContext } from '@zwave-js/cc';
 import { InterviewOptions } from '@zwave-js/cc';
+import { InterviewProgress } from '@zwave-js/core';
 import { InterviewStage } from '@zwave-js/core';
 import { IsCCSecure } from '@zwave-js/core';
 import { isCommandRequest } from '@zwave-js/serial/serialapi';
@@ -96,18 +104,19 @@ import { LogContext } from '@zwave-js/core';
 import type { LogFactory } from '@zwave-js/core';
 import { LogNodeOptions } from '@zwave-js/core';
 import { LongRangeChannel } from '@zwave-js/core';
+import { LongRangeMPDU } from '@zwave-js/core';
 import { MaybeNotKnown } from '@zwave-js/core';
 import { MaybeUnknown } from '@zwave-js/core';
 import { Message } from '@zwave-js/serial';
 import { MessageHeaders } from '@zwave-js/serial';
 import { MessageOptions } from '@zwave-js/serial';
-import { MessageOrCCLogEntry } from '@zwave-js/core';
 import { MessagePriority } from '@zwave-js/core';
 import { MessageType } from '@zwave-js/serial';
 import { MessageWithCC } from '@zwave-js/serial/serialapi';
 import type { MetadataUpdatedArgs } from '@zwave-js/core';
 import { MigrateNVMOptions } from '@zwave-js/nvmedit';
 import { ModifyCCs } from '@zwave-js/core';
+import { MPDU } from '@zwave-js/core';
 import { MPDUHeaderType } from '@zwave-js/core';
 import { MulticastDestination } from '@zwave-js/core';
 import { MultilevelSwitchCommand } from '@zwave-js/cc';
@@ -135,6 +144,13 @@ import { ProtocolVersion } from '@zwave-js/core';
 import { QRCodeVersion } from '@zwave-js/core';
 import { QRProvisioningInformation } from '@zwave-js/core';
 import { QuerySecurityClasses } from '@zwave-js/core';
+import { RadioCapability } from '@zwave-js/serial/rcp';
+import { RCPFunctionType } from '@zwave-js/serial';
+import { RCPMessage } from '@zwave-js/serial';
+import { RCPMessageOptions } from '@zwave-js/serial';
+import { RCPMessageType } from '@zwave-js/serial';
+import { RCPResponsePredicate } from '@zwave-js/serial';
+import { RCPResponseRole } from '@zwave-js/serial';
 import { ReadonlyObjectKeyMap } from '@zwave-js/shared';
 import { ReadonlyThrowingMap } from '@zwave-js/shared';
 import { RefreshValuesContext } from '@zwave-js/cc';
@@ -180,6 +196,9 @@ import { TaskScheduler as TaskScheduler_2 } from '@zwave-js/waddle';
 import { TransactionProgress } from '@zwave-js/core';
 import { TransactionProgressListener } from '@zwave-js/core';
 import { TranslatedValueID } from '@zwave-js/core';
+import type { TransmitCallbackStatus } from '@zwave-js/serial';
+import type { TransmitReplacement } from '@zwave-js/serial';
+import type { TransmitResponseStatus } from '@zwave-js/serial';
 import { TransmitStatus } from '@zwave-js/core';
 import { tryUnzipFirmwareFile } from '@zwave-js/core';
 import { TXReport } from '@zwave-js/core';
@@ -215,13 +234,89 @@ import { ZWaveDataRate } from '@zwave-js/core';
 import { ZWaveError } from '@zwave-js/core';
 import { ZWaveErrorCodes } from '@zwave-js/core';
 import { ZWaveLibraryTypes } from '@zwave-js/core';
+import { ZWaveMPDU } from '@zwave-js/core';
 import { ZWavePlusNodeType } from '@zwave-js/cc';
 import { ZWavePlusRoleType } from '@zwave-js/cc';
 import { ZWaveSerialBindingFactory } from '@zwave-js/serial';
 import { ZWaveSerialPortImplementation } from '@zwave-js/serial';
 import type { ZWaveSerialStream } from '@zwave-js/serial';
 
+// Warning: (ae-missing-release-tag) "AccessControlAPI" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export class AccessControlAPI extends FeatureAPI {
+    addUser(userId: number, options: SetUserOptions, credential?: {
+        type: UserCredentialType;
+        slot: number;
+        data: string | Uint8Array;
+    }): Promise<AddUserResult>;
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "getCredentialCapabilitiesCached"
+    assignCredential(type: UserCredentialType, slot: number, destinationUserId: number): Promise<AssignCredentialResult>;
+    cancelCredentialLearn(): Promise<SupervisionResult | undefined>;
+    deleteAllUsers(): Promise<SetUserResult>;
+    deleteCredential(type: UserCredentialType, slot: number): Promise<SetCredentialResult>;
+    // (undocumented)
+    deleteCredential(userId: number | undefined, type: UserCredentialType, slot: number): Promise<SetCredentialResult>;
+    deleteCredentials(options?: DeleteCredentialsOptions): Promise<SetCredentialResult>;
+    deleteUser(userId: number): Promise<SetUserResult>;
+    getAdminCode(): Promise<string | undefined>;
+    getAllCredentials(): Promise<CredentialData[]>;
+    getAllCredentialsCached(): CredentialData[];
+    getCredential(type: UserCredentialType, slot: number): Promise<CredentialData | undefined>;
+    getCredentialCached(type: UserCredentialType, slot: number): CredentialData | undefined;
+    getCredentialCapabilitiesCached(): CredentialCapabilities;
+    getCredentialsByType(type: UserCredentialType): Promise<CredentialData[]>;
+    getCredentialsByTypeCached(type: UserCredentialType): CredentialData[];
+    getCredentialsForUser(userId: number, type?: UserCredentialType): Promise<CredentialData[]>;
+    getCredentialsForUserCached(userId: number, type?: UserCredentialType): CredentialData[];
+    getUser(userId: number): Promise<UserData | undefined>;
+    getUserCached(userId: number): UserData | undefined;
+    getUserCapabilitiesCached(): UserCapabilities;
+    getUsers(): Promise<UserData[]>;
+    getUsersCached(): UserData[];
+    setAdminCode(code: string): Promise<SupervisionResult | undefined>;
+    setCredential(userId: number, type: UserCredentialType, slot: number, data: string | Uint8Array): Promise<SetCredentialResult>;
+    setUser(userId: number, options: SetUserOptions): Promise<SetUserResult>;
+    startCredentialLearn(userId: number, type: UserCredentialType, slot: number, timeout?: number): Promise<SupervisionResult | undefined>;
+}
+
+// Warning: (ae-missing-release-tag) "AddUserResult" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export interface AddUserResult {
+    credential?: SetCredentialResult;
+    user: SetUserResult;
+}
+
+// Warning: (ae-missing-release-tag) "AeotecConfigParam" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export enum AeotecConfigParam {
+    // (undocumented)
+    ConfigurationLocked = 252,
+    // (undocumented)
+    LEDIndicator = 81,
+    // (undocumented)
+    RFPowerLevel = 220,
+    // (undocumented)
+    SecurityNetworkEnabled = 242,
+    // (undocumented)
+    SecurityNetworkKey = 243
+}
+
 export { AllowedValue }
+
+// Warning: (ae-missing-release-tag) "AssignCredentialResult" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export enum AssignCredentialResult {
+    Error_InvalidCredential = 1,
+    Error_InvalidUser = 2,
+    // (undocumented)
+    Error_Unknown = 255,
+    // (undocumented)
+    OK = 0
+}
 
 // Warning: (ae-missing-release-tag) "BeamFrame" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -285,14 +380,65 @@ export { ControllerNodeLogContext }
 export interface ControllerProprietary {
     // (undocumented)
     "Nabu Casa"?: ControllerProprietary_NabuCasa;
+    // (undocumented)
+    "Z-Wave.me 700"?: ControllerProprietary_ZWaveMe700;
+    // (undocumented)
+    "Z-Wave.me"?: ControllerProprietary_ZWaveMe;
+    // (undocumented)
+    Aeotec?: ControllerProprietary_Aeotec;
 }
 
 // Warning: (ae-forgotten-export) The symbol "ControllerProprietaryCommon" needs to be exported by the entry point index.d.ts
+// Warning: (ae-missing-release-tag) "ControllerProprietary_Aeotec" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export class ControllerProprietary_Aeotec implements ControllerProprietaryCommon {
+    constructor(driver: Driver, controller: ZWaveController);
+    getConfig(params: AeotecConfigParam[]): Promise<Map<AeotecConfigParam, Bytes>>;
+    // (undocumented)
+    getConfigurationLocked(): Promise<boolean>;
+    // (undocumented)
+    getDefinedValueIDs(): TranslatedValueID[];
+    // (undocumented)
+    getLED(): Promise<boolean>;
+    // (undocumented)
+    getRFPowerLevel(): Promise<number>;
+    // (undocumented)
+    getSecurityNetworkEnabled(): Promise<boolean>;
+    // (undocumented)
+    getSecurityNetworkKey(): Promise<Uint8Array>;
+    // (undocumented)
+    handleUnsolicited(_msg: Message): Promise<boolean>;
+    // (undocumented)
+    interview(): Promise<void>;
+    // (undocumented)
+    pollValue(valueId: ValueID): Promise<unknown>;
+    resetConfig(param: AeotecConfigParam): Promise<boolean>;
+    setConfig(param: AeotecConfigParam, value: number | Uint8Array): Promise<boolean>;
+    // (undocumented)
+    setConfigurationLocked(locked: boolean): Promise<boolean>;
+    // (undocumented)
+    setLED(enabled: boolean): Promise<boolean>;
+    // (undocumented)
+    setRFPowerLevel(level: number): Promise<boolean>;
+    // (undocumented)
+    setSecurityNetworkEnabled(enabled: boolean): Promise<boolean>;
+    // (undocumented)
+    setSecurityNetworkKey(key: Uint8Array): Promise<boolean>;
+    // (undocumented)
+    setValue(valueId: ValueID, value: unknown): Promise<SetValueResult>;
+}
+
 // Warning: (ae-missing-release-tag) "ControllerProprietary_NabuCasa" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
 export class ControllerProprietary_NabuCasa implements ControllerProprietaryCommon {
     constructor(driver: Driver, controller: ZWaveController);
+    get bootloaderInfo(): NabuCasaBootloaderInfo | undefined;
+    // (undocumented)
+    getBootloaderInfo(): Promise<NabuCasaBootloaderInfo>;
+    // (undocumented)
+    getBootloaderVersion(): Promise<string | undefined>;
     // (undocumented)
     getConfig(key: NabuCasaConfigKey): Promise<number>;
     // (undocumented)
@@ -321,6 +467,60 @@ export class ControllerProprietary_NabuCasa implements ControllerProprietaryComm
     setSystemIndication(severity: NabuCasaIndicationSeverity): Promise<boolean>;
     // (undocumented)
     setValue(valueId: ValueID, value: unknown): Promise<SetValueResult>;
+}
+
+// Warning: (ae-missing-release-tag) "ControllerProprietary_ZWaveMe" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export class ControllerProprietary_ZWaveMe implements ControllerProprietaryCommon {
+    constructor(driver: Driver, controller: ZWaveController);
+    // (undocumented)
+    protected controller: ZWaveController;
+    // (undocumented)
+    protected driver: Driver;
+    // (undocumented)
+    getDefinedValueIDs(): TranslatedValueID[];
+    getRegionProprietary(): Promise<ZWaveMeRegion>;
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: This type of declaration is not supported yet by the resolver
+    getRFRegion(): Promise<RFRegion>;
+    // (undocumented)
+    handleUnsolicited(_msg: Message): Promise<boolean>;
+    // (undocumented)
+    interview(): Promise<void>;
+    // (undocumented)
+    pollValue(_valueId: ValueID): Promise<unknown>;
+    setRegionProprietary(region: ZWaveMeRegion): Promise<void>;
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: This type of declaration is not supported yet by the resolver
+    setRFRegion(region: RFRegion): Promise<void>;
+    // (undocumented)
+    setValue(_valueId: ValueID, _value: unknown): Promise<SetValueResult>;
+}
+
+// Warning: (ae-missing-release-tag) "ControllerProprietary_ZWaveMe700" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export class ControllerProprietary_ZWaveMe700 extends ControllerProprietary_ZWaveMe {
+    buildLicense(opts: {
+        vendorId: number;
+        maxNodes: number;
+        flags: ZWaveMeLicenseFlag[];
+        countSupport?: number;
+    }): Bytes;
+    getBoardInfo(): Promise<ZWaveMeBoardInfo>;
+    getLicense(): Promise<ZWaveMeLicense>;
+    // (undocumented)
+    interview(): Promise<void>;
+    setLicense(blob: Uint8Array): Promise<void>;
+    setLicenseFlags(flags: ZWaveMeLicenseFlag[]): Promise<void>;
+    setSerialAPIMode(mode: ZWaveMeSerialAPIMode): Promise<void>;
+    updateBootloader(data: Uint8Array, onProgress?: (progress: {
+        sent: number;
+        total: number;
+    }) => void): Promise<void>;
+    updateFirmware(data: Uint8Array, onProgress?: (progress: {
+        sent: number;
+        total: number;
+    }) => void): Promise<void>;
 }
 
 export { ControllerSelfLogContext }
@@ -385,6 +585,7 @@ export interface CredentialCapabilities {
     supportsAdminCode: boolean;
     // (undocumented)
     supportsAdminCodeDeactivation: boolean;
+    supportsCredentialAssignment: boolean;
 }
 
 // Warning: (ae-missing-release-tag) "CredentialChangedArgs" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
@@ -481,6 +682,15 @@ export type DateAndTime = AllOrNone<{
     dstOffset: number;
     standardOffset: number;
 }>;
+
+// Warning: (ae-missing-release-tag) "DeleteCredentialsOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface DeleteCredentialsOptions {
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: This type of declaration is not supported yet by the resolver
+    credentialType?: UserCredentialType;
+    userId?: number;
+}
 
 // Warning: (ae-missing-release-tag) "DeviceClass" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -591,7 +801,7 @@ export class Driver extends TypedEventTarget<DriverEventCallbacks> implements CC
     get queueIdle(): boolean;
     get ready(): boolean;
     // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
-    registerCommandHandler<T extends CCId>(predicate: (cc: CCId) => boolean, handler: (cc: T) => void): {
+    registerCommandHandler(predicate: (cc: CCId) => boolean, handler: (cc: CCId) => void): {
         unregister: () => void;
     };
     // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
@@ -649,10 +859,12 @@ export class Driver extends TypedEventTarget<DriverEventCallbacks> implements CC
     waitForCLIChunk<T extends CLIChunk>(predicate: (chunk: CLIChunk) => chunk is T, timeout?: number, abortSignal?: AbortSignal): Promise<T>;
     // (undocumented)
     waitForCLIChunk<T extends CLIChunk>(predicate: (chunk: CLIChunk) => boolean, timeout?: number, abortSignal?: AbortSignal): Promise<T>;
+    // Warning: (ae-forgotten-export) The symbol "WaitForCommandOptions" needs to be exported by the entry point index.d.ts
+    //
     // (undocumented)
-    waitForCommand<T extends CCId, U extends T>(predicate: (cc: CCId) => cc is U, timeout?: number, abortSignal?: AbortSignal): Promise<U>;
+    waitForCommand<T extends CCId, U extends T>(predicate: (cc: CCId) => cc is U, timeout?: number, abortSignal?: AbortSignal, options?: WaitForCommandOptions): Promise<U>;
     // (undocumented)
-    waitForCommand<T extends CCId>(predicate: (cc: CCId) => boolean, timeout?: number, abortSignal?: AbortSignal): Promise<T>;
+    waitForCommand<T extends CCId>(predicate: (cc: CCId) => boolean, timeout?: number, abortSignal?: AbortSignal, options?: WaitForCommandOptions): Promise<T>;
     // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
     // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
     waitForIdle(timeout?: number, abortSignal?: AbortSignal): Promise<void>;
@@ -766,19 +978,22 @@ export enum ExclusionStrategy {
     Unprovision = 2
 }
 
-// Warning: (ae-missing-release-tag) "ExplorerFrameCommand" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
-//
-// @public (undocumented)
-export enum ExplorerFrameCommand {
-    // (undocumented)
-    InclusionRequest = 1,
-    // (undocumented)
-    Normal = 0,
-    // (undocumented)
-    SearchResult = 2
-}
+export { ExplorerFrameCommand }
 
 export { extractFirmware }
+
+// Warning: (ae-missing-release-tag) "FeatureAPI" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export abstract class FeatureAPI {
+    constructor(endpoint: EndpointBase);
+    // Warning: (ae-forgotten-export) The symbol "EndpointBase" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly endpoint: EndpointBase;
+    // (undocumented)
+    protected getValue<T = unknown>(valueId: ValueID): MaybeNotKnown<T>;
+}
 
 export { FileSystem }
 
@@ -791,6 +1006,7 @@ export { FirmwareFileFormat }
 // @public
 export type FirmwareUpdateDeviceID = Expand<Omit<DeviceID, "sdkVersion"> & {
     firmwareVersion: string;
+    additionalFirmwareVersions?: Record<string, string>;
     rfRegion?: RFRegion;
 }>;
 
@@ -859,6 +1075,16 @@ export interface FoundNode {
 // @public (undocumented)
 export type Frame = ZWaveFrame | LongRangeFrame | BeamFrame;
 
+// Warning: (ae-missing-release-tag) "FUNC_ID_AEOTEC_CONFIG_GET" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export const FUNC_ID_AEOTEC_CONFIG_GET = FunctionType.Proprietary_F3;
+
+// Warning: (ae-missing-release-tag) "FUNC_ID_AEOTEC_CONFIG_SET" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export const FUNC_ID_AEOTEC_CONFIG_SET = FunctionType.Proprietary_F2;
+
 // Warning: (ae-missing-release-tag) "FUNC_ID_NABUCASA" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
@@ -867,6 +1093,12 @@ export const FUNC_ID_NABUCASA = FunctionType.Proprietary_F0;
 export { FunctionType }
 
 export { getEnumMemberName }
+
+export { GetFirmwareInfoRequest }
+
+export { GetFirmwareInfoResponse }
+
+export { GetFirmwareInfoResponseOptions }
 
 // Warning: (ae-missing-release-tag) "GetFirmwareUpdatesOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -960,6 +1192,8 @@ export interface InclusionUserCallbacks {
     // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
     validateDSKAndEnterPIN(dsk: string): Promise<string | false>;
 }
+
+export { InterviewProgress }
 
 export { InterviewStage }
 
@@ -1166,36 +1400,106 @@ export enum LongRangeFrameType {
     Singlecast = 0
 }
 
-// Warning: (ae-missing-release-tag) "LongRangeMPDU" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+export { LongRangeMPDU }
+
+// Warning: (ae-missing-release-tag) "MACDestinationWakeup" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export type MACDestinationWakeup = "250ms" | "1000ms" | "fragmented";
+
+// Warning: (ae-missing-release-tag) "MACTransmitAckOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
-export class LongRangeMPDU implements MPDU {
-    // Warning: (ae-forgotten-export) The symbol "MPDUOptions" needs to be exported by the entry point index.d.ts
-    constructor(options: MPDUOptions);
+export type MACTransmitAckOptions = {
+    homeId: number;
+    sourceNodeId: number;
+    destinationNodeId: number;
+    channel: number;
+    sequenceNumber: number;
+    txPower: number;
+} & ({
+    protocol: Protocols.ZWave;
+} | {
+    protocol: Protocols.ZWaveLongRange;
+    incomingRSSI?: number;
+    lrMpduOverrides?: {
+        txPower?: number;
+        noiseFloor?: number;
+    };
+});
+
+// Warning: (ae-missing-release-tag) "MACTransmitDestination" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export type MACTransmitDestination = {
+    kind: MACTransmitKind.Singlecast;
+    nodeId: number;
+} | {
+    kind: MACTransmitKind.Multicast;
+    nodeIds: number[];
+} | {
+    kind: MACTransmitKind.Broadcast;
+};
+
+// Warning: (ae-missing-release-tag) "MACTransmitKind" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export enum MACTransmitKind {
     // (undocumented)
-    readonly ackRequested: boolean;
+    Broadcast = 2,
     // (undocumented)
-    readonly destinationNodeId: number;
+    Multicast = 1,
     // (undocumented)
-    readonly frameInfo: ZnifferFrameInfo;
+    Singlecast = 0
+}
+
+// Warning: (ae-missing-release-tag) "MACTransmitOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface MACTransmitOptions {
     // (undocumented)
-    static from(msg: ZnifferDataMessage): LongRangeMPDU;
+    ackRequested?: boolean;
     // (undocumented)
-    readonly headerType: MPDUHeaderType;
+    destination: MACTransmitDestination;
+    destinationWakeup?: MACDestinationWakeup;
     // (undocumented)
-    readonly homeId: number;
+    homeId: number;
+    lrMpduOverrides?: {
+        txPower?: number;
+        noiseFloor?: number;
+    };
     // (undocumented)
-    readonly noiseFloor: RSSI;
+    protocol?: Protocols;
+    route?: readonly number[];
     // (undocumented)
-    payload: Bytes;
+    sourceNodeId: number;
+    txPower: number;
+    withCCA?: boolean;
+}
+
+// Warning: (ae-missing-release-tag) "MACTransmitReport" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface MACTransmitReport {
+    failedHop?: number;
+    repeaterRSSI?: readonly RSSI[];
     // (undocumented)
-    readonly sequenceNumber: number;
-    // (undocumented)
-    readonly sourceNodeId: number;
-    // (undocumented)
-    toLogEntry(): MessageOrCCLogEntry;
-    // (undocumented)
-    readonly txPower: number;
+    result: MACTransmitResult;
+}
+
+// Warning: (ae-missing-release-tag) "MACTransmitResult" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export enum MACTransmitResult {
+    ChannelBusy = 2,
+    Error_Aborted = 243,
+    Error_FrameLength = 242,
+    Error_QueueBusy = 241,
+    Error_Unknown = 254,
+    NoAck = 1,
+    NoRoutedAck = 3,
+    OK = 0,
+    RoutedError = 4
 }
 
 export { Message }
@@ -1210,34 +1514,59 @@ export { MessageWithCC }
 
 export { MigrateNVMOptions }
 
-// Warning: (ae-missing-release-tag) "MPDU" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
-//
-// @public (undocumented)
-export interface MPDU {
-    // (undocumented)
-    ackRequested: boolean;
-    // (undocumented)
-    frameInfo: ZnifferFrameInfo;
-    // (undocumented)
-    headerType: MPDUHeaderType;
-    // (undocumented)
-    homeId: number;
-    // (undocumented)
-    payload: Bytes;
-    // (undocumented)
-    sequenceNumber: number;
-    // (undocumented)
-    sourceNodeId: number;
-}
+export { MPDU }
 
 export { MPDUHeaderType }
 
 export { MultilevelSwitchCommand }
 
+// Warning: (ae-missing-release-tag) "NabuCasaBootloaderCapability" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export enum NabuCasaBootloaderCapability {
+    // (undocumented)
+    BootloaderUpgrade = 4,
+    // (undocumented)
+    Communication = 20,
+    // (undocumented)
+    EM4GPIORetention = 21,
+    // (undocumented)
+    EnforceCertificateSecureBoot = 8,
+    // (undocumented)
+    EnforceSecureBoot = 2,
+    // (undocumented)
+    EnforceUpgradeEncryption = 1,
+    // (undocumented)
+    EnforceUpgradeSignature = 0,
+    // (undocumented)
+    GBL = 5,
+    // (undocumented)
+    GBLEncryption = 7,
+    // (undocumented)
+    GBLSignature = 6,
+    // (undocumented)
+    PeripheralList = 10,
+    // (undocumented)
+    RollbackProtection = 9,
+    // (undocumented)
+    Storage = 16
+}
+
+// Warning: (ae-missing-release-tag) "NabuCasaBootloaderInfo" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface NabuCasaBootloaderInfo {
+    // (undocumented)
+    capabilities: NabuCasaBootloaderCapability[];
+    version: string;
+}
+
 // Warning: (ae-missing-release-tag) "NabuCasaCommand" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
 export enum NabuCasaCommand {
+    // (undocumented)
+    GetBootloaderInfo = 9,
     // (undocumented)
     GetConfig = 5,
     // (undocumented)
@@ -1423,9 +1752,16 @@ export enum OTWFirmwareUpdateStatus {
 // Warning: (ae-missing-release-tag) "parseMPDU" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
-export function parseMPDU(frame: ZnifferDataMessage): ZWaveMPDU | LongRangeMPDU;
+export function parseMPDU(frame: ZnifferDataMessage, frameInfo: ZnifferFrameInfo): ZWaveMPDU | LongRangeMPDU;
 
 export { parseQRCodeString }
+
+// Warning: (ae-missing-release-tag) "PartialRCPHostOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export type PartialRCPHostOptions = Expand<DeepPartial<Omit<RCPHostOptions, "logConfig" | "host">> & Partial<Pick<RCPHostOptions, "host">> & {
+    logConfig?: Partial<LogConfig>;
+}>;
 
 // Warning: (ae-missing-release-tag) "PartialZWaveOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -1435,6 +1771,27 @@ export type PartialZWaveOptions = Expand<DeepPartial<Omit<ZWaveOptions, "inclusi
     joinNetworkUserCallbacks?: ZWaveOptions["joinNetworkUserCallbacks"];
     logConfig?: Partial<LogConfig>;
 }>;
+
+// Warning: (ae-forgotten-export) The symbol "PHYLayerEventCallbacks" needs to be exported by the entry point index.d.ts
+// Warning: (ae-missing-release-tag) "PHYLayer" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export interface PHYLayer extends TypedEventTarget<PHYLayerEventCallbacks> {
+    abortBeam(): Promise<void>;
+    destroy(): Promise<void>;
+    measureNoiseFloor(channel: number): Promise<RSSI>;
+    // Warning: (ae-forgotten-export) The symbol "RegionConfig" needs to be exported by the entry point index.d.ts
+    queryRegion(): Promise<RegionConfig>;
+    get regionConfig(): MaybeNotKnown<RegionConfig>;
+    setRegion(region: RFRegion, channelConfig: ChannelConfiguration): Promise<ChannelInfo[]>;
+    get supportsAbortBeam(): boolean;
+    get supportsMeasureNoiseFloor(): boolean;
+    get supportsTransmitReplacements(): boolean;
+    transmit(mpdu: BytesView, options: TransmitOptions): Promise<TransmitResult>;
+    transmitBeam(options: TransmitBeamOptions): Promise<TransmitResult>;
+    // Warning: (ae-forgotten-export) The symbol "TxPowerRange" needs to be exported by the entry point index.d.ts
+    get txPowerRange(): MaybeNotKnown<TxPowerRange>;
+}
 
 // Warning: (ae-missing-release-tag) "PlannedProvisioningEntry" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -1453,6 +1810,34 @@ export interface PlannedProvisioningEntry {
 export { Powerlevel }
 
 export { PowerlevelTestStatus }
+
+// Warning: (ae-forgotten-export) The symbol "ProtocolControllerEventCallbacks" needs to be exported by the entry point index.d.ts
+// Warning: (ae-forgotten-export) The symbol "MACLayer" needs to be exported by the entry point index.d.ts
+// Warning: (ae-missing-release-tag) "ProtocolController" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export class ProtocolController extends TypedEventTarget<ProtocolControllerEventCallbacks> implements MACLayer {
+    // Warning: (ae-forgotten-export) The symbol "ProtocolControllerOptions" needs to be exported by the entry point index.d.ts
+    constructor(options: ProtocolControllerOptions);
+    // (undocumented)
+    autoAck: boolean;
+    autoAckTXPower: number;
+    // (undocumented)
+    destroy(): Promise<void>;
+    // (undocumented)
+    ownHomeId: number | undefined;
+    // (undocumented)
+    ownNodeId: number | undefined;
+    // (undocumented)
+    start(): Promise<void>;
+    // (undocumented)
+    transmitACK(options: MACTransmitAckOptions): Promise<MACTransmitResult>;
+    transmitData(data: BytesView, options: MACTransmitOptions): Promise<MACTransmitReport>;
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    waitForMPDU<T extends MPDU>(predicate: (mpdu: MPDU) => boolean, timeout?: number, abortSignal?: AbortSignal): Promise<T>;
+}
 
 export { ProtocolDataRate }
 
@@ -1477,6 +1862,101 @@ export enum ProvisioningEntryStatus {
 export { QRCodeVersion }
 
 export { QRProvisioningInformation }
+
+export { RCPFunctionType }
+
+// Warning: (ae-missing-release-tag) "RCPHost" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export class RCPHost extends TypedEventTarget<RCPHostEventCallbacks> implements PHYLayer {
+    constructor(port: string | ZWaveSerialPortImplementation | ZWaveSerialBindingFactory, options?: PartialRCPHostOptions);
+    abortBeam(): Promise<void>;
+    destroy(): Promise<void>;
+    measureNoiseFloor(channel: number): Promise<RSSI>;
+    queryRadioCapabilities(): Promise<RadioCapability[]>;
+    // (undocumented)
+    queryRegion(): Promise<RegionConfig>;
+    // (undocumented)
+    queryTxPowerRange(): Promise<TxPowerRange>;
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    queueSerialApiCommand<TResponse extends RCPMessage = RCPMessage>(msg: RCPMessage): Promise<TResponse>;
+    // (undocumented)
+    get radioCapabilities(): MaybeNotKnown<RadioCapability[]>;
+    // (undocumented)
+    get regionConfig(): MaybeNotKnown<RegionConfig>;
+    // (undocumented)
+    setRegion(region: RFRegion, channelConfig: ChannelConfiguration): Promise<ChannelInfo_2[]>;
+    // (undocumented)
+    start(): Promise<void>;
+    // (undocumented)
+    get supportsAbortBeam(): boolean;
+    // (undocumented)
+    get supportsMeasureNoiseFloor(): boolean;
+    // (undocumented)
+    get supportsTransmitReplacements(): boolean;
+    transmit(data: BytesView, options: TransmitOptions): Promise<TransmitResult>;
+    transmitBeam(options: TransmitBeamOptions): Promise<TransmitResult>;
+    // (undocumented)
+    get txPowerRange(): MaybeNotKnown<TxPowerRange>;
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    waitForMessage<T extends RCPMessage>(predicate: (msg: RCPMessage) => boolean, timeout?: number, refreshPredicate?: (msg: RCPMessage) => boolean, abortSignal?: AbortSignal): Promise<T>;
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    waitForMessageHeader(predicate: (header: MessageHeaders) => boolean, timeout?: number, abortSignal?: AbortSignal): Promise<MessageHeaders>;
+}
+
+// Warning: (ae-missing-release-tag) "RCPHostEventCallbacks" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface RCPHostEventCallbacks {
+    // Warning: (ae-forgotten-export) The symbol "MpduRxInfo" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    "mpdu received": (mpdu: MPDU, info: MpduRxInfo) => void;
+    // (undocumented)
+    error: (err: Error) => void;
+    // (undocumented)
+    ready: () => void;
+}
+
+// Warning: (ae-missing-release-tag) "RCPHostEvents" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export type RCPHostEvents = Extract<keyof RCPHostEventCallbacks, string>;
+
+// Warning: (ae-missing-release-tag) "RCPHostOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface RCPHostOptions {
+    // (undocumented)
+    host?: ZWaveOptions["host"];
+    logConfig?: Partial<LogConfig>;
+    timeouts: {
+        ack: number;
+        response: number;
+        callback: number;
+    };
+}
+
+// Warning: (ae-missing-release-tag) "RCPLogContext" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface RCPLogContext extends LogContext<"rcp"> {
+    // (undocumented)
+    direction?: DataDirection;
+}
+
+export { RCPMessage }
+
+export { RCPMessageOptions }
+
+export { RCPMessageType }
+
+export { RCPResponsePredicate }
+
+export { RCPResponseRole }
 
 // Warning: (ae-missing-release-tag) "RebuildRoutesOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -1530,6 +2010,11 @@ export { ResponsePredicate }
 export { ResponseRole }
 
 export { RFRegion }
+
+// Warning: (ae-missing-release-tag) "rfRegionToZWaveMeRegion" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export function rfRegionToZWaveMeRegion(region: RFRegion): ZWaveMeRegion | undefined;
 
 // Warning: (ae-missing-release-tag) "RGB" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -1616,6 +2101,28 @@ export { SerialAPISetupCommand }
 
 export { SetbackState }
 
+// Warning: (ae-missing-release-tag) "SetCredentialResult" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export enum SetCredentialResult {
+    // (undocumented)
+    Error_AddRejectedLocationOccupied = 1,
+    // (undocumented)
+    Error_DuplicateAdminPINCode = 5,
+    // (undocumented)
+    Error_DuplicateCredential = 3,
+    // (undocumented)
+    Error_ManufacturerSecurityRules = 4,
+    // (undocumented)
+    Error_ModifyRejectedLocationEmpty = 2,
+    // (undocumented)
+    Error_Unknown = 255,
+    // (undocumented)
+    Error_WrongUserUniqueIdentifier = 6,
+    // (undocumented)
+    OK = 0
+}
+
 // Warning: (ae-missing-release-tag) "SetUserOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
@@ -1632,6 +2139,20 @@ export interface SetUserOptions {
     userType?: UserCredentialUserType;
 }
 
+// Warning: (ae-missing-release-tag) "SetUserResult" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export enum SetUserResult {
+    // (undocumented)
+    Error_AddRejectedLocationOccupied = 1,
+    // (undocumented)
+    Error_ModifyRejectedLocationEmpty = 2,
+    // (undocumented)
+    Error_Unknown = 255,
+    // (undocumented)
+    OK = 0
+}
+
 // Warning: (ae-missing-release-tag) "SmartStartProvisioningEntry" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
@@ -1640,6 +2161,38 @@ export type SmartStartProvisioningEntry = PlannedProvisioningEntry | IncludedPro
 export { Switchpoint }
 
 export { TranslatedValueID }
+
+// Warning: (ae-missing-release-tag) "TransmitBeamOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface TransmitBeamOptions {
+    channels: number[];
+    // (undocumented)
+    data: BytesView;
+    // (undocumented)
+    fragmentDurationMs: number;
+    // (undocumented)
+    fragmentPeriodMs: number;
+    // (undocumented)
+    numFragments: number;
+    txPower?: number;
+}
+
+// Warning: (ae-missing-release-tag) "TransmitOptions" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface TransmitOptions {
+    // (undocumented)
+    channel: number;
+    replacements?: TransmitReplacement[];
+    txPower?: number;
+    withCCA: boolean;
+}
+
+// Warning: (ae-missing-release-tag) "TransmitResult" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export type TransmitResult = TransmitResponseStatus | TransmitCallbackStatus;
 
 export { tryUnzipFirmwareFile }
 
@@ -1657,6 +2210,8 @@ export interface UserCapabilities {
     supportedCredentialRules: readonly UserCredentialRule[];
     // (undocumented)
     supportedUserTypes: readonly UserCredentialUserType[];
+    // (undocumented)
+    supportsUsersWithoutCredentials: boolean;
 }
 
 // Warning: (ae-missing-release-tag) "UserData" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
@@ -1868,6 +2423,7 @@ export class ZWaveController extends TypedEventTarget<ControllerEventCallbacks> 
     // (undocumented)
     beginLeavingNetwork(): Promise<LeaveNetworkResult>;
     beginRebuildingRoutes(options?: RebuildRoutesOptions): boolean;
+    get bootloaderVersion(): MaybeNotKnown<string>;
     // (undocumented)
     cancelSecureBootstrapS2(reason: KEXFailType): void;
     checkAssociation(source: AssociationAddress, group: number, destination: AssociationAddress): AssociationCheckResult;
@@ -2050,6 +2606,7 @@ export class ZWaveController extends TypedEventTarget<ControllerEventCallbacks> 
     sdkVersionGte(version: SDKVersion): MaybeNotKnown<boolean>;
     sdkVersionLt(version: SDKVersion): MaybeNotKnown<boolean>;
     sdkVersionLte(version: SDKVersion): MaybeNotKnown<boolean>;
+    setControllerNIF(): Promise<void>;
     setLongRangeChannel(channel: LongRangeChannel.A | LongRangeChannel.B | LongRangeChannel.Auto): Promise<boolean>;
     setMaxLongRangePowerlevel(limit: number): Promise<boolean>;
     setPowerlevel(powerlevel: number, measured0dBm: number): Promise<boolean>;
@@ -2125,7 +2682,8 @@ export type ZWaveFrame = {
     sequenceNumber: number;
     homeId: number;
     sourceNodeId: number;
-} & (({
+} & (// Singlecast frame, either routed or not
+({
     type: ZWaveFrameType.Singlecast;
     destinationNodeId: number;
     ackRequested: boolean;
@@ -2211,40 +2769,134 @@ export type ZWaveInterviewFailedCallback = (node: ZWaveNode, args: NodeInterview
 
 export { ZWaveLibraryTypes }
 
-// Warning: (ae-missing-release-tag) "ZWaveMPDU" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+// Warning: (ae-missing-release-tag) "ZWaveMeBoardInfo" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
-export class ZWaveMPDU implements MPDU {
-    constructor(options: MPDUOptions);
+export interface ZWaveMeBoardInfo {
     // (undocumented)
-    readonly ackRequested: boolean;
+    bootloaderCRC32: number;
     // (undocumented)
-    readonly beamingInfo: BeamingInfo;
+    bootloaderVersion: string;
     // (undocumented)
-    protected readonly destinationBuffer: Bytes;
+    buildNumber: number;
     // (undocumented)
-    readonly frameInfo: ZnifferFrameInfo;
+    buildTimestamp: number;
     // (undocumented)
-    static from(msg: ZnifferDataMessage): ZWaveMPDU;
+    chipFamily?: number;
     // (undocumented)
-    readonly headerType: MPDUHeaderType;
+    chipType?: number;
     // (undocumented)
-    readonly homeId: number;
+    chipUUID: Bytes;
     // (undocumented)
-    readonly lowPower: boolean;
+    coreVersion: number;
     // (undocumented)
-    payload: Bytes;
+    hardwareRevision: number;
     // (undocumented)
-    readonly routed: boolean;
+    keysHash?: number;
     // (undocumented)
-    readonly sequenceNumber: number;
+    lockStatus: number;
     // (undocumented)
-    readonly sourceNodeId: number;
+    sdkVersion: number;
     // (undocumented)
-    readonly speedModified: boolean;
+    serialNumber: Bytes;
     // (undocumented)
-    toLogEntry(): MessageOrCCLogEntry;
+    seVersion?: number;
 }
+
+// Warning: (ae-missing-release-tag) "ZWaveMeLicense" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface ZWaveMeLicense {
+    // (undocumented)
+    countSupport: number;
+    // (undocumented)
+    flags: ZWaveMeLicenseFlag[];
+    // (undocumented)
+    maxNodes: number;
+    // (undocumented)
+    raw: Bytes;
+    // (undocumented)
+    vendorId: number;
+}
+
+// Warning: (ae-missing-release-tag) "ZWaveMeLicenseFlag" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export enum ZWaveMeLicenseFlag {
+    // (undocumented)
+    AdvancedNetworkDiagnostics = 4,
+    // (undocumented)
+    AllowMaxRFPower = 1,
+    // (undocumented)
+    BackupRestore = 2,
+    // (undocumented)
+    BatterySaveOnSleeping = 3,
+    // (undocumented)
+    ChangeVendorID = 7,
+    // (undocumented)
+    ControllerStaticAPI = 0,
+    // (undocumented)
+    FastCommunications = 6,
+    // (undocumented)
+    LongRange = 5,
+    // (undocumented)
+    PromiscuousMode = 8,
+    // (undocumented)
+    RFJammingDetection = 10,
+    // (undocumented)
+    ZnifferAdvancedRadioTool = 12,
+    // (undocumented)
+    ZnifferPTIMode = 11
+}
+
+// Warning: (ae-missing-release-tag) "ZWaveMeRegion" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export enum ZWaveMeRegion {
+    // (undocumented)
+    ANZ = 4,
+    // (undocumented)
+    CN = 6,
+    // (undocumented)
+    EU = 0,
+    // (undocumented)
+    EU_LR = 12,
+    // (undocumented)
+    HK = 5,
+    // (undocumented)
+    IL = 9,
+    // (undocumented)
+    IN = 2,
+    // (undocumented)
+    JP = 7,
+    // (undocumented)
+    KR = 8,
+    // (undocumented)
+    MY = 10,
+    // (undocumented)
+    RU = 1,
+    // (undocumented)
+    US = 3,
+    // (undocumented)
+    US_LR = 11
+}
+
+// Warning: (ae-missing-release-tag) "zwaveMeRegionToRFRegion" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export function zwaveMeRegionToRFRegion(region: ZWaveMeRegion): RFRegion | undefined;
+
+// Warning: (ae-missing-release-tag) "ZWaveMeSerialAPIMode" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export enum ZWaveMeSerialAPIMode {
+    // (undocumented)
+    Bridge = 0,
+    // (undocumented)
+    Static = 1
+}
+
+export { ZWaveMPDU }
 
 // Warning: (ae-forgotten-export) The symbol "AllNodeEvents" needs to be exported by the entry point index.d.ts
 // Warning: (ae-forgotten-export) The symbol "NodeStatisticsHost" needs to be exported by the entry point index.d.ts
@@ -2285,10 +2937,12 @@ export class ZWaveNode extends ZWaveNodeMixins implements QuerySecurityClasses {
     interview(): Promise<void>;
     get interviewAttempts(): number;
     interviewCC(cc: CommandClasses): Promise<void>;
-    protected interviewCCs(): Promise<boolean>;
+    // (undocumented)
+    protected interviewCCs(): AsyncGenerator<(() => Promise<unknown>) | undefined, boolean>;
     protected interviewNodeInfo(): Promise<void>;
     isHealthCheckInProgress(): boolean;
     isLinkReliabilityCheckInProgress(): boolean;
+    get lastAwake(): MaybeNotKnown<Date>;
     get lastSeen(): MaybeNotKnown<Date>;
     get location(): MaybeNotKnown<string>;
     set location(value: string | undefined);
@@ -2310,7 +2964,7 @@ export class ZWaveNode extends ZWaveNodeMixins implements QuerySecurityClasses {
     refreshInfo(options?: RefreshInfoOptions): Promise<void>;
     refreshValues(): Promise<void>;
     // (undocumented)
-    requestNodeInfo(): Promise<NodeUpdatePayload>;
+    requestNodeInfo(options?: SendMessageOptions): Promise<NodeUpdatePayload>;
     // (undocumented)
     sendResetLocallyNotification(): Promise<void>;
     setDateAndTime(now?: Date): Promise<boolean>;
@@ -2340,6 +2994,8 @@ export interface ZWaveNodeEventCallbacks extends ZWaveNodeValueEventCallbacks {
     "interview completed": (node: ZWaveNode) => void;
     // (undocumented)
     "interview failed": ZWaveInterviewFailedCallback;
+    // (undocumented)
+    "interview progress": ZWaveNodeInterviewProgressCallback;
     // (undocumented)
     "interview stage completed": (node: ZWaveNode, stageName: string) => void;
     // (undocumented)
@@ -2374,7 +3030,7 @@ export type ZWaveNodeEvents = Extract<keyof ZWaveNodeEventCallbacks, string>;
 // Warning: (ae-missing-release-tag) "zWaveNodeEvents" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
-export const zWaveNodeEvents: readonly ["notification", "interview failed", "firmware update progress", "firmware update finished", "wake up", "sleep", "dead", "alive", "interview completed", "ready", "interview stage completed", "interview started", "value added", "value updated", "value removed", "metadata updated", "value notification", "user added", "user modified", "user deleted", "credential added", "credential modified", "credential deleted", "credential learn progress", "credential learn completed"];
+export const zWaveNodeEvents: readonly ["notification", "interview failed", "firmware update progress", "firmware update finished", "wake up", "sleep", "dead", "alive", "interview completed", "ready", "interview stage completed", "interview progress", "interview started", "value added", "value updated", "value removed", "metadata updated", "value notification", "user added", "user modified", "user deleted", "credential added", "credential modified", "credential deleted", "credential learn progress", "credential learn completed"];
 
 // Warning: (ae-missing-release-tag) "ZWaveNodeFirmwareUpdateFinishedCallback" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -2385,6 +3041,11 @@ export type ZWaveNodeFirmwareUpdateFinishedCallback = (node: ZWaveNode, result: 
 //
 // @public (undocumented)
 export type ZWaveNodeFirmwareUpdateProgressCallback = (node: ZWaveNode, progress: FirmwareUpdateProgress) => void;
+
+// Warning: (ae-missing-release-tag) "ZWaveNodeInterviewProgressCallback" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export type ZWaveNodeInterviewProgressCallback = (node: ZWaveNode, progress: InterviewProgress) => void;
 
 // Warning: (ae-missing-release-tag) "ZWaveNodeMetadataUpdatedArgs" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -2521,7 +3182,7 @@ export interface ZWaveNotificationCallbackArgs_PowerlevelCC {
 // @public
 export type ZWaveNotificationCallbackParams_BatteryCC = [
 endpoint: Endpoint,
-ccId: (typeof CommandClasses.Battery),
+ccId: typeof CommandClasses.Battery,
 args: ZWaveNotificationCallbackArgs_BatteryCC
 ];
 
@@ -2607,6 +3268,7 @@ export interface ZWaveOptions {
         nodeInterview: number;
         smartStartInclusion: number;
         firmwareUpdateOTW: number;
+        partialReports: number;
     };
     bootloaderMode?: "recover" | "allow" | "stay";
     disableOptimisticValueUpdate?: boolean;
@@ -2694,6 +3356,7 @@ export interface ZWaveOptions {
         manufacturerId: number;
         productType: number;
         productId: number;
+        deviceId?: string | Uint8Array;
         hardwareVersion?: number;
         installerIcon?: number;
         userIcon?: number;
@@ -2705,15 +3368,16 @@ export * from "@zwave-js/cc";
 
 // Warnings were encountered during analysis:
 //
-// /home/runner/work/zwave-js/zwave-js/packages/cc/src/lib/API.ts:109:4 - (tsdoc-undefined-tag) The TSDoc tag "@publicAPI" is not defined in this configuration
+// /home/runner/work/zwave-js/zwave-js/packages/cc/src/lib/API.ts:107:4 - (tsdoc-undefined-tag) The TSDoc tag "@publicAPI" is not defined in this configuration
 // /home/runner/work/zwave-js/zwave-js/packages/cc/src/lib/Security2/shared.ts:11:5 - (tsdoc-undefined-tag) The TSDoc tag "@publicAPI" is not defined in this configuration
-// src/lib/controller/Controller.ts:914:2 - (ae-missing-getter) The property "provisioningList" has a setter but no getter.
-// src/lib/driver/Driver.ts:1071:24 - (tsdoc-escape-greater-than) The ">" character should be escaped using a backslash to avoid confusion with an HTML tag
-// src/lib/driver/Driver.ts:7648:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
-// src/lib/driver/ZWaveOptions.ts:376:120 - (tsdoc-escape-greater-than) The ">" character should be escaped using a backslash to avoid confusion with an HTML tag
-// src/lib/node/Node.ts:2251:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
-// src/lib/zniffer/Zniffer.ts:740:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
-// src/lib/zniffer/Zniffer.ts:741:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+// src/lib/controller/Controller.ts:929:2 - (ae-missing-getter) The property "provisioningList" has a setter but no getter.
+// src/lib/driver/Driver.ts:1109:24 - (tsdoc-escape-greater-than) The ">" character should be escaped using a backslash to avoid confusion with an HTML tag
+// src/lib/driver/Driver.ts:8125:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+// src/lib/driver/ZWaveOptions.ts:383:120 - (tsdoc-escape-greater-than) The ">" character should be escaped using a backslash to avoid confusion with an HTML tag
+// src/lib/node/Node.ts:2608:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+// src/lib/rcp/RCPHost.ts:571:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+// src/lib/zniffer/Zniffer.ts:737:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+// src/lib/zniffer/Zniffer.ts:738:5 - (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
 
 // (No @packageDocumentation comment for this package)
 

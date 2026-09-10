@@ -1,7 +1,9 @@
 import type { SetValueResult } from "@zwave-js/cc";
 import type { RFRegion, TranslatedValueID, ValueID } from "@zwave-js/core";
 import type { Message } from "@zwave-js/serial";
+
 import type { Driver } from "../driver/Driver.js";
+
 import type { ZWaveController } from "./Controller.js";
 import { ControllerProprietary_Aeotec } from "./proprietary/Aeotec.js";
 import { ControllerProprietary_NabuCasa } from "./proprietary/NabuCasa.js";
@@ -106,6 +108,12 @@ export interface ControllerProprietaryCommon {
 	pollValue(valueId: ValueID): Promise<unknown>;
 	setValue(valueId: ValueID, value: unknown): Promise<SetValueResult>;
 	handleUnsolicited(msg: Message): Promise<boolean>;
+	/**
+	 * Reads the bootloader version, if this controller exposes it through
+	 * proprietary commands. Returns undefined when the controller's firmware does
+	 * not support the query.
+	 */
+	getBootloaderVersion?(): Promise<string | undefined>;
 	/** Reads the RF region, if this controller configures it through proprietary commands */
 	getRFRegion?(): Promise<RFRegion>;
 	/** Configures the RF region, if this controller configures it through proprietary commands */

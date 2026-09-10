@@ -1,0 +1,1941 @@
+import {
+	AckLongRangeMPDU,
+	AckZWaveMPDU,
+	LONG_RANGE_MPDU_NOISE_FLOOR_OFFSET,
+	type LogConfig,
+	type LogContainer,
+	LongRangeMPDU,
+	MAX_NODES,
+	type MPDU,
+	type MPDUEncodingContext,
+	MPDUHeaderType,
+	type MPDULogContext,
+	type MaybeNotKnown,
+	NODE_ID_BROADCAST,
+	NODE_ID_BROADCAST_LR,
+	ProtocolDataRate,
+	ProtocolHeaderFormat,
+	Protocols,
+	type RSSI,
+	RoutedZWaveMPDU,
+	RssiError,
+	SinglecastLongRangeMPDU,
+	SinglecastZWaveMPDU,
+	ZWaveError,
+	ZWaveErrorCodes,
+	encodeLongRangeBeamFrame,
+	encodeZWaveBeamFrame,
+	getProtocolHeaderFormatForDataRate,
+	isRssiError,
+	longRangeHomeIdHash,
+	zwaveHomeIdHash,
+} from "@zwave-js/core";
+import {
+	type ChannelInfo,
+	TransmitCallbackStatus,
+	type TransmitReplacement,
+	TransmitReplacementSource,
+	TransmitResponseStatus,
+} from "@zwave-js/serial";
+import {
+	type AwaitedThing,
+	Bytes,
+	type BytesView,
+	TypedEventTarget,
+	getEnumMemberName,
+	getErrorMessage,
+	setTimer,
+} from "@zwave-js/shared";
+import { wait } from "alcalzone-shared/async";
+import {
+	type DeferredPromise,
+	createDeferredPromise,
+} from "alcalzone-shared/deferred-promise";
+
+import type { ZWaveOptions } from "../driver/ZWaveOptions.js";
+import { ProtocolLogger } from "../log/Protocol.js";
+
+import type { MACLayer } from "./MACLayer.js";
+import {
+	type MpduRxInfo,
+	type PHYLayer,
+	type PHYLayerFactory,
+	type TransmitResult,
+	type TxPowerRange,
+	getProtocolDataRateOrThrow,
+} from "./PHYLayer.js";
+import {
+	type MACDestinationWakeup,
+	type MACTransmitAckOptions,
+	MACTransmitKind,
+	type MACTransmitOptions,
+	type MACTransmitReport,
+	MACTransmitResult,
+} from "./_Types.js";
+
+type AwaitedMPDUEntry = AwaitedThing<MPDU>;
+
+interface TransmitAttempt {
+	/**
+	 * Resolved when the attempt is made, so an LR primary channel change during
+	 * an ongoing transmission takes effect
+	 */
+	channel: () => ChannelInfo;
+	speedModified: boolean;
+}
+
+// ITU-T G.9959 (01/2015), Table 8-19
+// Lower bound of the random backoff before a retransmission (exclusive)
+const MAC_MIN_RETRANSMIT_DELAY_MS = 10;
+// Upper bound of the random backoff before a retransmission (exclusive)
+const MAC_MAX_RETRANSMIT_DELAY_MS = 40;
+
+// ITU-T G.9959 (01/2015), Table 7-27
+// aPhyTurnaroundTimerRXTX, "RX-to-TX minimum turnaround time"
+const PHY_TURNAROUND_TIME_RX_TX_MS = 1;
+
+// ITU-T G.9959 (01/2015), Table 8-18
+// Number of retries after a failed transmission
+const MAC_MAX_FRAME_RETRIES = 2;
+
+// Z-Wave Long Range PHY and MAC Layer Specification (2023.07.03), Table 6-33
+// Lower bound of the random backoff before a retransmission (exclusive)
+const LR_MIN_RETRANSMIT_DELAY_MS = 10;
+// Upper bound of the random backoff before a retransmission (exclusive)
+const LR_MAX_RETRANSMIT_DELAY_MS = 40;
+
+// Z-Wave Long Range PHY and MAC Layer Specification (2023.07.03), Table 6-32
+// Number of retries after a failed transmission
+const MAC_LR_MAX_FRAME_RETRIES = 2;
+// Number of retries on the secondary channel in channel configuration 3
+const MAC_LR_MAX_FRAME_RETRIES_SECONDARY = 1;
+
+// Z-Wave Long Range PHY and MAC Layer Specification (2023.07.03), Table 6-27
+// Bounds of the RSSI an MPDU field can carry
+const LR_RSSI_MIN_DBM = -120;
+const LR_RSSI_MAX_DBM = 30;
+
+// Extra time each hop gets on top of the frame duration, covering repeater
+// processing and turnaround
+const ROUTED_HOP_MARGIN_MS = 10;
+
+// Extra time the host grants an ack on top of the MAC ack wait duration. The
+// MAC timings assume the radio itself decides, while our transmit command and
+// the ack each have to cross the serial connection. This covers both round
+// trips and is tuned empirically
+const ACK_HOST_TRANSPORT_ALLOWANCE_MS = 20;
+
+const DEFAULT_AUTO_ACK_TX_POWER_DBM = 14;
+
+// Bounds of an int8 field
+const INT8_MIN = -128;
+const INT8_MAX = 127;
+
+/** The RSSI to advertise for a received frame, clamped into the range the MPDU field allows */
+function advertisedRSSI(rssi: RSSI): number {
+	// Pass errors through
+	if (isRssiError(rssi)) return rssi;
+	return Math.max(
+		LR_RSSI_MIN_DBM,
+		Math.min(LR_RSSI_MAX_DBM, Math.round(rssi)),
+	);
+}
+
+function assertInt8(value: number | undefined, name: string): void {
+	if (value == undefined) return;
+	if (!Number.isInteger(value) || value < INT8_MIN || value > INT8_MAX) {
+		throw new ZWaveError(
+			`${name} must be an integer between ${INT8_MIN} and ${INT8_MAX}`,
+			ZWaveErrorCodes.Argument_Invalid,
+		);
+	}
+}
+
+/**
+ * Reject a radio TX power outside the range the firmware reported, before any
+ * frame goes out. A firmware that does not report its range only has to accept
+ * what the serial encoding can carry
+ */
+function assertRadioTXPower(
+	txPower: number,
+	range: MaybeNotKnown<TxPowerRange>,
+): void {
+	if (range == undefined) return;
+	if (txPower < range.min || txPower > range.max) {
+		throw new ZWaveError(
+			`The TX power must be between ${range.min} and ${range.max} dBm`,
+			ZWaveErrorCodes.Argument_Invalid,
+		);
+	}
+}
+
+/** Translate the radio's report into a MAC result */
+function macResultFromTransmit(result: TransmitResult): MACTransmitResult {
+	switch (result) {
+		case TransmitCallbackStatus.Completed:
+			return MACTransmitResult.OK;
+
+		case TransmitCallbackStatus.ChannelBusy:
+			// TODO: Wait for the channel to be free, try again
+			return MACTransmitResult.ChannelBusy;
+
+		case TransmitResponseStatus.Busy:
+			return MACTransmitResult.Error_QueueBusy;
+
+		case TransmitResponseStatus.Overflow:
+		case TransmitCallbackStatus.Underflow:
+			return MACTransmitResult.Error_FrameLength;
+
+		case TransmitCallbackStatus.Aborted:
+			return MACTransmitResult.Error_Aborted;
+
+		case TransmitCallbackStatus.Blocked:
+		// Should not happen, since we never block TX
+		case TransmitResponseStatus.InvalidChannel:
+		case TransmitResponseStatus.InvalidParam:
+		// Should not happen, since everything is checked beforehand
+		case TransmitCallbackStatus.UnknownError:
+		default:
+			return MACTransmitResult.Error_Unknown;
+	}
+}
+
+/** The bit rate a data rate transmits at, in bits per second */
+function bitsPerSecond(dataRate: ProtocolDataRate): number {
+	switch (dataRate) {
+		case ProtocolDataRate.ZWave_9k6:
+			return 9600;
+		case ProtocolDataRate.ZWave_40k:
+			return 40000;
+		default:
+			return 100000;
+	}
+}
+
+/**
+ * How long to wait for an ack after a transmission, in milliseconds. The result
+ * includes the host transport allowance on top of the duration the MAC mandates
+ */
+export function ackWaitDuration(
+	dataRate: ProtocolDataRate,
+	headerFormat: ProtocolHeaderFormat,
+): number {
+	let ackBits: number;
+	if (dataRate === ProtocolDataRate.LongRange_100k) {
+		// Z-Wave Long Range PHY and MAC Layer Specification (2023.07.03),
+		// Table 6-33: aMacLRTransferAckTimeTX, "The number of symbols of an Ack
+		// MPDU; including preamble"
+		ackBits = 448;
+	} else {
+		// ITU-T G.9959 (01/2015), Table 8-19: aMacTransferAckTimeTX (ch), "The
+		// number of symbols of an ACK MPDU; including preamble". R3 needs fewer in
+		// channel configuration 3 than in configurations 1 and 2
+		switch (dataRate) {
+			case ProtocolDataRate.ZWave_9k6:
+				ackBits = 168;
+				break;
+			case ProtocolDataRate.ZWave_40k:
+				ackBits = 248;
+				break;
+			default:
+				ackBits =
+					headerFormat === ProtocolHeaderFormat.Classic3Channel
+						? 296
+						: 416;
+				break;
+		}
+	}
+
+	// ITU-T G.9959 (01/2015), Table 8-18: aMacMinAckWaitDuration is
+	// "aPhyTurnaroundTimeRxTx + (aMacTransferAckTimeTX * (1/data rate))".
+	// The LR spec defines aMacLRMinAckWaitDuration the same way in Table 6-32
+	return (
+		PHY_TURNAROUND_TIME_RX_TX_MS
+		+ (ackBits * 1000) / bitsPerSecond(dataRate)
+		+ ACK_HOST_TRANSPORT_ALLOWANCE_MS
+	);
+}
+
+/**
+ * Plan the transmit attempts of a classic frame in a 2-channel region, fastest
+ * rate first
+ */
+export function classic2ChannelAttemptSchedule(
+	channels: readonly ChannelInfo[],
+): TransmitAttempt[] {
+	const byDataRate = (dataRate: ProtocolDataRate) =>
+		channels.find((ch) => ch.dataRate === dataRate);
+	const r3 = byDataRate(ProtocolDataRate.ZWave_100k);
+	const r2 = byDataRate(ProtocolDataRate.ZWave_40k);
+	const r1 = byDataRate(ProtocolDataRate.ZWave_9k6);
+
+	// G.9959 Table 7-3: configuration 1 carries R1 and R2 on its single
+	// channel, configuration 2 adds R3 on channel A. A retry can therefore
+	// fall back to a slower and more robust rate
+	const availableChannels = [r3, r2, r1].filter((ch) => ch != undefined);
+
+	// Send the fastest rate twice, then fall back to the slower rates.
+	// §8.1.5.2: "If transmissions fail a total of (1 + aMacMaxFrameRetries)
+	// times, the originating MAC layer issues a failure confirmation", so the
+	// schedule must hold exactly that many attempts. Repeat the fastest rate
+	// when the region has fewer rates, and drop the slowest when it has more
+	const numAttempts = 1 + MAC_MAX_FRAME_RETRIES;
+	const scheduled = [availableChannels[0], ...availableChannels];
+	while (scheduled.length < numAttempts) {
+		scheduled.unshift(availableChannels[0]);
+	}
+	scheduled.length = numAttempts;
+
+	const initialBitrate = bitsPerSecond(scheduled[0].dataRate);
+
+	return scheduled.map((ch) => ({
+		channel: () => ch,
+		speedModified: bitsPerSecond(ch.dataRate) < initialBitrate,
+	}));
+}
+
+/** The random backoff to wait before a retransmission, in milliseconds */
+export function randomRetransmitDelay(isLongRange: boolean): number {
+	// ITU-T G.9959 (01/2015), §8.1.5.1.4.4: "The random delay shall be calculated
+	// as a period in the interval aMacMinRetransmitDelay .. aMacMaxRetransmitDelay".
+	// Both bounds are exclusive, since the tables call for a backoff higher than
+	// the minimum and lower than the maximum
+	const min = isLongRange
+		? LR_MIN_RETRANSMIT_DELAY_MS
+		: MAC_MIN_RETRANSMIT_DELAY_MS;
+	const max = isLongRange
+		? LR_MAX_RETRANSMIT_DELAY_MS
+		: MAC_MAX_RETRANSMIT_DELAY_MS;
+	return min + 1 + Math.floor(Math.random() * (max - min - 1));
+}
+
+/** How long a frame of the given length occupies the channel, in milliseconds */
+export function frameDuration(
+	frameLength: number,
+	dataRate: ProtocolDataRate,
+	headerFormat: ProtocolHeaderFormat,
+): number {
+	// ITU-T G.9959 (01/2015), Table 7-10: the minimum singlecast preamble is 10 bytes
+	// for R1 and R2. R3 uses 40 bytes in channel configuration 2 and 24 bytes in
+	// channel configuration 3
+	let preambleLength: number;
+	switch (dataRate) {
+		case ProtocolDataRate.ZWave_9k6:
+		case ProtocolDataRate.ZWave_40k:
+			preambleLength = 10;
+			break;
+		default:
+			preambleLength =
+				headerFormat === ProtocolHeaderFormat.Classic3Channel ? 24 : 40;
+			break;
+	}
+
+	return (
+		((frameLength + preambleLength) * 8 * 1000) / bitsPerSecond(dataRate)
+	);
+}
+
+/**
+ * Time to wait for a routed acknowledgement or routed error, measured from the moment
+ * repeater 0 has repeated the frame.
+ */
+export function routedAckTimeout(
+	numRepeaters: number,
+	frameDurationMs: number,
+): number {
+	// Repeater 0 has already repeated the frame, so numRepeaters - 1 hops remain until
+	// it reaches the destination, and numRepeaters + 1 hops bring the routed ack back.
+	// Routed frames go out with Ack Req = 0, so no hop is retransmitted by the MAC layer
+	const numHops = 2 * numRepeaters;
+	const timeout = numHops * (frameDurationMs + ROUTED_HOP_MARGIN_MS);
+
+	// Z-Wave and Z-Wave Long Range Network Layer Specification (2023.05.26),
+	// Table 4.28: aNwkRoutedAckTimeout is the "Timeout for considering that a
+	// particular Routed Frame has been lost and will not return any Routed
+	// Acknowledgement or Routed Error." with a range of 18ms..1000ms
+	return Math.min(1000, Math.max(18, Math.ceil(timeout)));
+}
+
+/** Whether the frame is a routed frame that its last repeater has delivered to the destination */
+export function isFinalHopOfRoutedFrame(mpdu: MPDU): mpdu is RoutedZWaveMPDU {
+	return (
+		mpdu instanceof RoutedZWaveMPDU
+		&& mpdu.direction === "outbound"
+		&& mpdu.hop === mpdu.repeaters.length
+	);
+}
+
+// ITU-T G.9959 (01/2015), §8.1.3.12
+// Recommended duration of a short continuous beam (at most 300 ms)
+const SHORT_CONTINUOUS_BEAM_DURATION_MS = 275;
+// Recommended duration of a long continuous beam (at most 1160 ms)
+const LONG_CONTINUOUS_BEAM_DURATION_MS = 1100;
+
+// ITU-T G.9959 (01/2015), §8.1.3.11, repeated in the LR spec §6.3.7
+// Duration of one beam fragment (allowed range 110..115 ms)
+const BEAM_FRAGMENT_DURATION_MS = 112;
+// Time between the starts of consecutive fragments (allowed range 190..200 ms)
+const BEAM_FRAGMENT_PERIOD_MS = 200;
+// "A full fragmented beam shall span 3 000 ms." 16 fragments at the maximum
+// period hit that span exactly, first fragment start to last fragment start
+const NUM_BEAM_FRAGMENTS = 16;
+
+export interface BeamParameters {
+	/** Whether this is a continuous beam */
+	continuous: boolean;
+	numFragments: number;
+	fragmentDurationMs: number;
+	fragmentPeriodMs: number;
+}
+
+/**
+ * Translate a destination's wakeup interval into the beam the header format
+ * demands. Throws when the wakeup type does not match the header format.
+ */
+export function getBeamParameters(
+	wakeup: MACDestinationWakeup,
+	headerFormat: ProtocolHeaderFormat,
+): BeamParameters {
+	// G.9959 §8.1.3.14: "FL nodes operating in channel configuration 3 shall be
+	// able to receive and transmit the fragmented beam format at data rate 3."
+	// The LR MAC defines only the fragmented beam
+	const fragmentedOnly =
+		headerFormat !== ProtocolHeaderFormat.Classic2Channel;
+
+	if (wakeup === "fragmented") {
+		if (!fragmentedOnly) {
+			throw new ZWaveError(
+				`Fragmented beams are not supported in channel configurations 1 and 2`,
+				ZWaveErrorCodes.Argument_Invalid,
+			);
+		}
+		return {
+			continuous: false,
+			numFragments: NUM_BEAM_FRAGMENTS,
+			fragmentDurationMs: BEAM_FRAGMENT_DURATION_MS,
+			fragmentPeriodMs: BEAM_FRAGMENT_PERIOD_MS,
+		};
+	}
+
+	if (fragmentedOnly) {
+		throw new ZWaveError(
+			`Continuous beams are only supported in channel configurations 1 and 2`,
+			ZWaveErrorCodes.Argument_Invalid,
+		);
+	}
+
+	// G.9959 §8.1.3.12: "A continuous beam is a series of beam frames spanning a
+	// fixed period of time". The firmware executes it as a single fragment
+	const duration =
+		wakeup === "250ms"
+			? SHORT_CONTINUOUS_BEAM_DURATION_MS
+			: LONG_CONTINUOUS_BEAM_DURATION_MS;
+	return {
+		continuous: true,
+		numFragments: 1,
+		fragmentDurationMs: duration,
+		fragmentPeriodMs: duration,
+	};
+}
+
+export interface ProtocolControllerOptions {
+	/**
+	 * Optional log configuration
+	 */
+	logConfig?: Partial<LogConfig>;
+
+	host?: Pick<Required<NonNullable<ZWaveOptions["host"]>>, "log">;
+
+	phy: PHYLayerFactory;
+}
+
+export interface ProtocolControllerEventCallbacks {
+	ready: () => void;
+	error: (err: Error) => void;
+}
+
+export type ProtocolControllerEvents = Extract<
+	keyof ProtocolControllerEventCallbacks,
+	string
+>;
+
+export class ProtocolController
+	extends TypedEventTarget<ProtocolControllerEventCallbacks>
+	implements MACLayer
+{
+	public constructor(options: ProtocolControllerOptions) {
+		super();
+
+		// TODO: When extending the options further, use clone and deep merge with defaults
+		this._options = options;
+	}
+
+	private _options: ProtocolControllerOptions;
+
+	/**
+	 * The host bindings used to access file system etc.
+	 */
+	// This is set during `start()` and should not be accessed before
+	private bindings!: Pick<Required<NonNullable<ZWaveOptions["host"]>>, "log">;
+
+	private phyLayer: PHYLayer | undefined;
+
+	// This is set during `start()` and should not be accessed before
+	private _logContainer!: LogContainer;
+	// This is set during `start()` and should not be accessed before
+	private protocolLog!: ProtocolLogger;
+
+	public ownHomeId: number | undefined;
+	public ownNodeId: number | undefined;
+	public autoAck: boolean = true;
+	/** The TX power in dBm for the acknowledgements the controller sends by itself */
+	public autoAckTXPower: number = DEFAULT_AUTO_ACK_TX_POWER_DBM;
+
+	/**
+	 * The TX power the controller acknowledges with, clamped into the range the radio reported.
+	 */
+	private getSafeAutoAckTXPower(): number {
+		const range = this.phyLayer?.txPowerRange;
+		if (range == undefined) return this.autoAckTXPower;
+		return Math.max(range.min, Math.min(range.max, this.autoAckTXPower));
+	}
+
+	/** A list of awaited MPDUs */
+	private awaitedMPDUs: AwaitedMPDUEntry[] = [];
+
+	/** Resolves once the frame exchange currently holding the radio is done */
+	private radioIdle: Promise<void> = Promise.resolve();
+
+	private sequenceNumber: number | undefined;
+
+	/** The LR channel this node transmits on */
+	private primaryLongRangeChannel: number | undefined;
+
+	private _destroyPromise: DeferredPromise<void> | undefined;
+	private get wasDestroyed(): boolean {
+		return !!this._destroyPromise;
+	}
+
+	public async start(): Promise<void> {
+		if (this.wasDestroyed) {
+			throw new ZWaveError(
+				"The protocol controller was destroyed. Create a new instance and initialize that one.",
+				ZWaveErrorCodes.Driver_Destroyed,
+			);
+		}
+
+		// Populate default bindings. This has to happen asynchronously, so the driver does not have a hard dependency
+		// on Node.js internals
+		this.bindings = {
+			log:
+				this._options.host?.log
+				?? (await import("@zwave-js/core/bindings/log/node")).log,
+		};
+
+		// Initialize logging
+		this._logContainer = this.bindings.log(this._options.logConfig);
+		this.protocolLog = new ProtocolLogger(this._logContainer);
+
+		this.phyLayer = await this._options.phy();
+		this.phyLayer.on("mpdu received", (mpdu, info) => {
+			try {
+				this.handleReceivedMPDU(mpdu, info);
+			} catch (e) {
+				this.emit(
+					"error",
+					e instanceof Error ? e : new Error(getErrorMessage(e)),
+				);
+			}
+		});
+
+		this.emit("ready");
+	}
+
+	private nextSequenceNumber(headerFormat: ProtocolHeaderFormat): number {
+		if (headerFormat === ProtocolHeaderFormat.Classic2Channel) {
+			// 4 bits, 0x01..0x0f
+			this.sequenceNumber ??= 0x00;
+			this.sequenceNumber++;
+			if (this.sequenceNumber > 0x0f) {
+				this.sequenceNumber = 0x01;
+			}
+			return this.sequenceNumber;
+		} else {
+			// 8 bits, 0x00..0xff
+			this.sequenceNumber ??= 0xff;
+			this.sequenceNumber = (this.sequenceNumber + 1) & 0xff;
+			return this.sequenceNumber;
+		}
+	}
+
+	private getProtocolDataRateOrThrow(channel: number): ProtocolDataRate {
+		return getProtocolDataRateOrThrow(
+			this.phyLayer?.regionConfig?.channels,
+			channel,
+		);
+	}
+
+	/** Serialize an MPDU and log it */
+	private serializeOutbound(
+		mpdu: MPDU,
+		ctx: MPDUEncodingContext,
+		replacements?: TransmitReplacement[],
+	): Bytes {
+		const frame = mpdu.serialize(ctx);
+
+		this.protocolLog.mpdu(
+			mpdu,
+			ctx,
+			"outbound",
+			replacements?.length ? ["noise floor"] : undefined,
+		);
+
+		return frame;
+	}
+
+	private sendFrame(
+		frame: BytesView,
+		ctx: MPDUEncodingContext,
+		options: {
+			txPower: number;
+			withCCA: boolean;
+			replacements?: TransmitReplacement[];
+		},
+	): Promise<TransmitResult> {
+		return this.phyLayer!.transmit(frame, {
+			channel: ctx.channel,
+			txPower: options.txPower,
+			withCCA: options.withCCA,
+			replacements: options.replacements,
+		});
+	}
+
+	private async sendMPDU(
+		mpdu: MPDU,
+		ctx: MPDUEncodingContext,
+		options: {
+			txPower: number;
+			withCCA: boolean;
+			replacements?: TransmitReplacement[];
+		},
+	): Promise<TransmitResult> {
+		const frame = this.serializeOutbound(mpdu, ctx, options.replacements);
+		return this.sendFrame(frame, ctx, options);
+	}
+
+	/**
+	 * Ask the firmware to patch a freshly measured noise floor into an outgoing
+	 * Long Range frame, where the serialized frame carries the "not available"
+	 * placeholder. A caller-supplied noise floor is left alone.
+	 */
+	private getNoiseFloorReplacements(
+		protocol: Protocols | undefined,
+		noiseFloorOverride: number | undefined,
+	): TransmitReplacement[] | undefined {
+		if (protocol !== Protocols.ZWaveLongRange) return undefined;
+		if (noiseFloorOverride != undefined) return undefined;
+		if (!this.phyLayer?.supportsTransmitReplacements) return undefined;
+		return [
+			{
+				offset: LONG_RANGE_MPDU_NOISE_FLOOR_OFFSET,
+				source: TransmitReplacementSource.NoiseFloor,
+			},
+		];
+	}
+
+	/**
+	 * The noise floor to serialize into a Long Range frame. Firmware that can
+	 * patch the frame gets the placeholder and fills it in itself, older
+	 * firmware is asked to measure the channel first.
+	 */
+	private async getAdvertisedNoiseFloor(
+		protocol: Protocols | undefined,
+		noiseFloorOverride: number | undefined,
+		channel: number,
+	): Promise<number> {
+		if (noiseFloorOverride != undefined) return noiseFloorOverride;
+		if (protocol !== Protocols.ZWaveLongRange) {
+			return RssiError.NotAvailable;
+		}
+		if (this.phyLayer?.supportsTransmitReplacements) {
+			return RssiError.NotAvailable;
+		}
+		if (!this.phyLayer?.supportsMeasureNoiseFloor) {
+			return RssiError.NotAvailable;
+		}
+
+		try {
+			return advertisedRSSI(
+				await this.phyLayer.measureNoiseFloor(channel),
+			);
+		} catch (e) {
+			// A frame advertising no noise floor still reaches the destination
+			this.protocolLog.print(
+				`Could not measure the noise floor on channel ${channel}: ${getErrorMessage(
+					e,
+				)}`,
+				"warn",
+			);
+			return RssiError.NotAvailable;
+		}
+	}
+
+	private getChannelsForProtocolOrThrow(protocol: Protocols): ChannelInfo[] {
+		const allChannels = this.phyLayer?.regionConfig?.channels ?? [];
+		const channels = allChannels.filter((ch) =>
+			protocol === Protocols.ZWave
+				? ch.dataRate === ProtocolDataRate.ZWave_9k6
+					|| ch.dataRate === ProtocolDataRate.ZWave_40k
+					|| ch.dataRate === ProtocolDataRate.ZWave_100k
+				: ch.dataRate === ProtocolDataRate.LongRange_100k,
+		);
+		if (channels.length === 0) {
+			throw new ZWaveError(
+				`The current region has no ${
+					protocol === Protocols.ZWave
+						? "classic Z-Wave"
+						: "Z-Wave Long Range"
+				} channels`,
+				ZWaveErrorCodes.Driver_NotSupported,
+			);
+		}
+		return channels;
+	}
+
+	private getPrimaryLongRangeChannel(): ChannelInfo {
+		const channels = this.getChannelsForProtocolOrThrow(
+			Protocols.ZWaveLongRange,
+		);
+		return (
+			channels.find((ch) => ch.channel === this.primaryLongRangeChannel)
+			?? channels[0]
+		);
+	}
+
+	private getSecondaryLongRangeChannel(): ChannelInfo {
+		const channels = this.getChannelsForProtocolOrThrow(
+			Protocols.ZWaveLongRange,
+		);
+		const primary = this.getPrimaryLongRangeChannel();
+		// Compare by channel number, since each lookup re-filters the region's
+		// channel list and a setRegion in between replaces the objects
+		return channels.find((ch) => ch.channel !== primary.channel) ?? primary;
+	}
+
+	/** The channel the first transmit attempt of a frame goes out on */
+	private getInitialChannel(protocol: Protocols): ChannelInfo {
+		if (protocol === Protocols.ZWaveLongRange) {
+			return this.getPrimaryLongRangeChannel();
+		}
+		const channels = this.getChannelsForProtocolOrThrow(protocol);
+		return (
+			channels.find((ch) => ch.dataRate === ProtocolDataRate.ZWave_100k)
+			?? channels[0]
+		);
+	}
+
+	/**
+	 * Plan the transmit attempts of a frame, in order. G.9959 mandates the number
+	 * of attempts, the channel each retry uses is left to the implementation
+	 */
+	private getAttemptSchedule(
+		protocol: Protocols,
+		headerFormat: ProtocolHeaderFormat,
+	): TransmitAttempt[] {
+		const channels = this.getChannelsForProtocolOrThrow(protocol);
+
+		switch (headerFormat) {
+			case ProtocolHeaderFormat.LongRange: {
+				const attempts: TransmitAttempt[] = Array.from(
+					{ length: 1 + MAC_LR_MAX_FRAME_RETRIES },
+					() => ({
+						channel: () => this.getPrimaryLongRangeChannel(),
+						speedModified: false,
+					}),
+				);
+
+				// The two-LR-channel end device configuration is LR channel
+				// configuration 3. §6.5.1.5.4: "If an Ack MPDU is still not received
+				// after aMacLRMaxFrameRetries retransmissions, the MAC layer shall
+				// switch to the Secondary channel and and repeat the process of
+				// transmitting the MPDU and waiting for the Ack MPDU up to
+				// aMacLRMaxFrameRetriesSecondary times."
+				if (channels.length >= 2) {
+					for (
+						let i = 0;
+						i < MAC_LR_MAX_FRAME_RETRIES_SECONDARY;
+						i++
+					) {
+						attempts.push({
+							channel: () => this.getSecondaryLongRangeChannel(),
+							speedModified: false,
+						});
+					}
+				}
+				return attempts;
+			}
+
+			case ProtocolHeaderFormat.Classic3Channel:
+				// All three channels of channel configuration 3 run at R3, so there is
+				// no speed to fall back to. G.9959 leaves the channel of each retry to
+				// the implementation, and we rotate through the channels
+				return Array.from(
+					{ length: 1 + MAC_MAX_FRAME_RETRIES },
+					(_, i) => {
+						const channel = channels[i % channels.length];
+						return {
+							channel: () => channel,
+							speedModified: false,
+						};
+					},
+				);
+
+			case ProtocolHeaderFormat.Classic2Channel:
+				return classic2ChannelAttemptSchedule(channels);
+
+			default:
+				// oxlint-disable-next-line typescript/restrict-template-expressions
+				throw new Error(`Unsupported header format ${headerFormat}`);
+		}
+	}
+
+	/**
+	 * Beam a sleeping FLiRS destination awake. Returns the channel the
+	 * destination listens on, if the beam pins one.
+	 */
+	private async wakeDestination(
+		phy: PHYLayer,
+		options: MACTransmitOptions,
+		beam: BeamParameters,
+		protocol: Protocols,
+		headerFormat: ProtocolHeaderFormat,
+		radioTXPower: number,
+	): Promise<
+		{ pinnedChannel?: ChannelInfo } | { result: MACTransmitResult }
+	> {
+		const isLongRange = headerFormat === ProtocolHeaderFormat.LongRange;
+		const isBroadcast =
+			options.destination.kind === MACTransmitKind.Broadcast;
+		const destinationNodeId =
+			options.destination.kind === MACTransmitKind.Singlecast
+				? options.destination.nodeId
+				: protocol === Protocols.ZWaveLongRange
+					? NODE_ID_BROADCAST_LR
+					: NODE_ID_BROADCAST;
+
+		// G.9959 §8.1.3.11: "A receiving node may interrupt the transmission of a
+		// fragmented beam by acknowledging a singlecast beam fragment. A receiving
+		// node shall not acknowledge a broadcast beam fragment." The LR spec §6.3.7
+		// requires the interrupt: "A receiving node shall interrupt the transmission
+		// of a fragmented beam by acknowledging a singlecast beam fragment." Every
+		// receiver acks an LR broadcast beam. We do not know how many acks to
+		// expect, so that beam runs to completion too
+		const canBeInterrupted = !beam.continuous && !isBroadcast;
+
+		let channels: number[];
+		let data: BytesView;
+		let pinnedChannel: ChannelInfo | undefined;
+
+		if (isLongRange) {
+			// LR §6.3.7: "A receiver shall be able to monitor both channel A and B
+			// for beam frames", so both channels carry fragments. The firmware cycles
+			// them per fragment, starting with the primary
+			const primary = this.getPrimaryLongRangeChannel();
+			const secondary = this.getSecondaryLongRangeChannel();
+			channels =
+				secondary === primary
+					? [primary.channel]
+					: [primary.channel, secondary.channel];
+			data = encodeLongRangeBeamFrame({
+				destinationNodeId,
+				txPower: radioTXPower,
+				homeIdHash: longRangeHomeIdHash(options.homeId),
+			});
+		} else {
+			data = encodeZWaveBeamFrame({
+				destinationNodeId,
+				homeIdHash: zwaveHomeIdHash(options.homeId),
+			});
+			const classic = this.getChannelsForProtocolOrThrow(Protocols.ZWave);
+			if (headerFormat === ProtocolHeaderFormat.Classic3Channel) {
+				// §8.1.3.11: "A receiver shall be able to monitor multiple channels
+				// for beam frames", so the firmware cycles the fragments through all
+				// three channels
+				channels = classic.map((ch) => ch.channel);
+			} else {
+				// §8.1.3.12: "The continuous beam shall be sent at data rate R2."
+				// Table 7-1 marks FL mode as available on the R2 profiles only, and
+				// Table 7-3 places those on channel B. A FLiRS node listens there
+				const r2 = classic.find(
+					(ch) => ch.dataRate === ProtocolDataRate.ZWave_40k,
+				);
+				if (r2 == undefined) {
+					throw new ZWaveError(
+						`The current region has no R2 channel to beam on`,
+						ZWaveErrorCodes.Driver_NotSupported,
+					);
+				}
+				channels = [r2.channel];
+				pinnedChannel = r2;
+			}
+		}
+
+		this.protocolLog.print(
+			`Beaming node ${destinationNodeId} awake on channel${
+				channels.length > 1 ? "s" : ""
+			} ${channels.join(", ")}`,
+			"verbose",
+		);
+
+		const beamPromise = phy.transmitBeam({
+			txPower: radioTXPower,
+			numFragments: beam.numFragments,
+			fragmentDurationMs: beam.fragmentDurationMs,
+			fragmentPeriodMs: beam.fragmentPeriodMs,
+			channels,
+			data,
+		});
+
+		let acked = false;
+		if (canBeInterrupted) {
+			const AckMPDU = isLongRange ? AckLongRangeMPDU : AckZWaveMPDU;
+			const isBeamAck = (m: MPDU) =>
+				m instanceof AckMPDU
+				&& m.homeId === options.homeId
+				&& m.sourceNodeId === destinationNodeId;
+
+			const ackAbort = new AbortController();
+			try {
+				const ackPromise = this.waitForMPDU(
+					isBeamAck,
+					beam.numFragments * beam.fragmentPeriodMs,
+					ackAbort.signal,
+				).then(
+					() => true,
+					() => false,
+				);
+
+				acked = await Promise.race([
+					ackPromise,
+					beamPromise.then(() => false),
+				]);
+			} finally {
+				// The wait must end with the beam, so the ack of the frame that
+				// follows is not consumed here
+				ackAbort.abort();
+			}
+
+			if (acked) {
+				// A beam that ran out on its own in the meantime answers the abort
+				// with a failure. The destination is awake either way
+				await phy.abortBeam().catch(() => {});
+			}
+		}
+
+		const result = await beamPromise;
+		if (
+			result !== TransmitCallbackStatus.Completed
+			&& !(result === TransmitCallbackStatus.Aborted && acked)
+		) {
+			// Say why the beam did not complete. The "Beaming node ..." line
+			// above only says one was started
+			this.protocolLog.print(
+				`Beaming node ${destinationNodeId} failed: ${getEnumMemberName(
+					result >= TransmitCallbackStatus.Aborted
+						? TransmitCallbackStatus
+						: TransmitResponseStatus,
+					result,
+				)}`,
+				"warn",
+			);
+		}
+		switch (result) {
+			case TransmitCallbackStatus.Completed:
+				break;
+
+			case TransmitCallbackStatus.Aborted:
+				// Our own abort after the destination acked leaves the beam aborted
+				if (acked) break;
+				return { result: MACTransmitResult.Error_Aborted };
+
+			case TransmitResponseStatus.Busy:
+				return { result: MACTransmitResult.Error_QueueBusy };
+
+			default:
+				return { result: MACTransmitResult.Error_Unknown };
+		}
+
+		if (isLongRange) {
+			// An ack from the destination has already moved the primary channel to
+			// the one the destination answered on, per §6.5.1.4. The frame must go
+			// out there, so the channel is captured now
+			pinnedChannel = this.getPrimaryLongRangeChannel();
+		}
+
+		return { pinnedChannel };
+	}
+
+	/**
+	 * Send a frame and report what came back. Concurrent calls are serialized,
+	 * so their attempts and backoffs do not interleave on air.
+	 */
+	public transmitData(
+		data: BytesView,
+		options: MACTransmitOptions,
+	): Promise<MACTransmitReport> {
+		return this.withRadio(() => this.transmitDataExclusive(data, options));
+	}
+
+	/**
+	 * Hold the radio for one frame exchange. Acknowledgements must not take this
+	 * lock, because G.9959 §8.1.5.1.4.2 requires them inside the turnaround time.
+	 * A transmit waiting for its own ack holds the radio far longer than that.
+	 */
+	private async withRadio<T>(exchange: () => Promise<T>): Promise<T> {
+		const predecessor = this.radioIdle;
+		const release = createDeferredPromise<void>();
+		this.radioIdle = release;
+
+		await predecessor;
+		try {
+			return await exchange();
+		} finally {
+			release.resolve();
+		}
+	}
+
+	private async transmitDataExclusive(
+		data: BytesView,
+		options: MACTransmitOptions,
+	): Promise<MACTransmitReport> {
+		if (this.wasDestroyed) {
+			return { result: MACTransmitResult.Error_Aborted };
+		}
+
+		if (this.phyLayer == undefined) {
+			throw new ZWaveError(
+				`The PHY layer has not been initialized yet!`,
+				ZWaveErrorCodes.Driver_NotReady,
+			);
+		}
+
+		if (this.phyLayer.regionConfig == undefined) {
+			throw new ZWaveError(
+				`The current region is not known yet`,
+				ZWaveErrorCodes.Driver_NotReady,
+			);
+		}
+
+		assertInt8(options.lrMpduOverrides?.txPower, "The advertised TX power");
+		assertInt8(
+			options.lrMpduOverrides?.noiseFloor,
+			"The advertised noise floor",
+		);
+
+		// If no protocol is specified, make an assumption based on the node ID
+		let protocol: Protocols | undefined = options.protocol;
+		if (protocol == undefined) {
+			switch (options.destination.kind) {
+				case MACTransmitKind.Singlecast: {
+					const nodeId = options.destination.nodeId;
+					if (nodeId <= MAX_NODES || nodeId === NODE_ID_BROADCAST) {
+						protocol = Protocols.ZWave;
+					} else if (nodeId >= 256) {
+						protocol = Protocols.ZWaveLongRange;
+					} else {
+						throw new ZWaveError(
+							`Unable to determine protocol for node ID ${nodeId}`,
+							ZWaveErrorCodes.Argument_Invalid,
+						);
+					}
+					break;
+				}
+				case MACTransmitKind.Multicast: {
+					throw new Error("No multicast support yet!");
+				}
+				case MACTransmitKind.Broadcast: {
+					throw new ZWaveError(
+						`The protocol must be specified for broadcast transmissions`,
+						ZWaveErrorCodes.Argument_Invalid,
+					);
+				}
+			}
+		}
+
+		const route = options.route;
+		if (route) {
+			if (protocol !== Protocols.ZWave) {
+				throw new ZWaveError(
+					`Source routing is only supported for classic Z-Wave`,
+					ZWaveErrorCodes.Argument_Invalid,
+				);
+			}
+			if (options.destination.kind !== MACTransmitKind.Singlecast) {
+				throw new ZWaveError(
+					`Source routing is only supported for singlecast transmissions`,
+					ZWaveErrorCodes.Argument_Invalid,
+				);
+			}
+			// Z-Wave and Z-Wave Long Range Network Layer Specification
+			// (2023.05.26), NWK:0019.1: "This field shall be in the range 1…4."
+			if (route.length < 1 || route.length > 4) {
+				throw new ZWaveError(
+					`A route must contain between 1 and 4 repeaters, got ${route.length}`,
+					ZWaveErrorCodes.Argument_Invalid,
+				);
+			}
+			for (const repeater of route) {
+				// The routing header encodes each repeater in a single byte
+				if (
+					!Number.isInteger(repeater)
+					|| repeater < 1
+					|| repeater > MAX_NODES
+				) {
+					throw new ZWaveError(
+						`A repeater must be a node ID between 1 and ${MAX_NODES}, got ${repeater}`,
+						ZWaveErrorCodes.Argument_Invalid,
+					);
+				}
+			}
+		}
+
+		const initialChannel = this.getInitialChannel(protocol);
+		const headerFormat = getProtocolHeaderFormatForDataRate(
+			this.phyLayer.regionConfig.region,
+			initialChannel.dataRate,
+		);
+		let attempts = this.getAttemptSchedule(protocol, headerFormat);
+
+		const wakeup = options.destinationWakeup;
+		let beam: BeamParameters | undefined;
+		if (wakeup != undefined) {
+			if (route) {
+				throw new ZWaveError(
+					`Beaming a FLiRS destination over a route is not implemented yet`,
+					ZWaveErrorCodes.Driver_NotSupported,
+				);
+			}
+			if (options.destination.kind === MACTransmitKind.Multicast) {
+				throw new ZWaveError(
+					`Beaming is only supported for singlecast and broadcast transmissions`,
+					ZWaveErrorCodes.Argument_Invalid,
+				);
+			}
+			beam = getBeamParameters(wakeup, headerFormat);
+
+			// Only beam if we can stop it again
+			if (
+				!beam.continuous
+				&& options.destination.kind !== MACTransmitKind.Broadcast
+				&& !this.phyLayer.supportsAbortBeam
+			) {
+				throw new ZWaveError(
+					`Beaming a singlecast destination requires firmware support for aborting a beam`,
+					ZWaveErrorCodes.Driver_NotSupported,
+				);
+			}
+		}
+
+		const sequenceNumber = this.nextSequenceNumber(headerFormat);
+
+		const radioTXPower = options.txPower;
+		assertRadioTXPower(radioTXPower, this.phyLayer.txPowerRange);
+		// The MPDU TX Power field is an int8, while the radio accepts 0.1 dBm steps
+		const advertisedTXPower =
+			options.lrMpduOverrides?.txPower ?? Math.round(radioTXPower);
+		const advertisedNoiseFloor = await this.getAdvertisedNoiseFloor(
+			protocol,
+			options.lrMpduOverrides?.noiseFloor,
+			initialChannel.channel,
+		);
+		const replacements = this.getNoiseFloorReplacements(
+			protocol,
+			options.lrMpduOverrides?.noiseFloor,
+		);
+
+		let mpdu: MPDU;
+		if (protocol == Protocols.ZWave) {
+			switch (options.destination.kind) {
+				case MACTransmitKind.Singlecast: {
+					if (route) {
+						mpdu = new RoutedZWaveMPDU({
+							homeId: options.homeId,
+							// ITU-T G.9959 (01/2015), §9.3: "MPDUs may carry mesh routing
+							// information when the "Routed" flag of the frame control field
+							// is set or if the "Routed Frame" header type is used."
+							// The 3-channel frame control has no routed flag
+							headerType:
+								headerFormat
+								=== ProtocolHeaderFormat.Classic3Channel
+									? MPDUHeaderType.Routed
+									: MPDUHeaderType.Singlecast,
+							routed: true,
+							// Z-Wave and Z-Wave Long Range Network Layer Specification
+							// (2023.05.26), NWK:0180.1: "A node sending or repeating a
+							// routing frame should not request a MPDU Acknowledgement (ACK
+							// Req subfield set to 0 in the MPDU Frame Control). The sending
+							// node should instead listen for the next repeater repeat frame
+							// and use this as a silent acknowledgement."
+							// This is a should, so a caller may still ask for one
+							ackRequested: options.ackRequested ?? false,
+							sourceNodeId: options.sourceNodeId,
+							destinationNodeId: options.destination.nodeId,
+							sequenceNumber,
+							speedModified: false,
+							direction: "outbound",
+							routedAck: false,
+							routedError: false,
+							hop: 0,
+							repeaters: [...route],
+							// NWK:018E.1: "A node using Channel Configuration 3 shall set the
+							// Destination Wake Up field to 0 when transmitting to an AL node."
+							// Beaming to FLiRS destinations is not implemented yet
+							destinationWakeup: false,
+						});
+					} else {
+						mpdu = new SinglecastZWaveMPDU({
+							homeId: options.homeId,
+							ackRequested: options.ackRequested ?? true,
+							sourceNodeId: options.sourceNodeId,
+							destinationNodeId: options.destination.nodeId,
+							sequenceNumber,
+							speedModified: false,
+						});
+					}
+					break;
+				}
+				case MACTransmitKind.Multicast: {
+					throw new Error("No multicast support yet!");
+				}
+				case MACTransmitKind.Broadcast: {
+					mpdu = new SinglecastZWaveMPDU({
+						homeId: options.homeId,
+						ackRequested: false,
+						sourceNodeId: options.sourceNodeId,
+						destinationNodeId: NODE_ID_BROADCAST,
+						sequenceNumber,
+						speedModified: false,
+					});
+					break;
+				}
+			}
+		} else {
+			// Long Range
+			switch (options.destination.kind) {
+				case MACTransmitKind.Singlecast: {
+					mpdu = new SinglecastLongRangeMPDU({
+						homeId: options.homeId,
+						ackRequested: options.ackRequested ?? true,
+						sourceNodeId: options.sourceNodeId,
+						destinationNodeId: options.destination.nodeId,
+						sequenceNumber,
+						txPower: advertisedTXPower,
+						noiseFloor: advertisedNoiseFloor,
+					});
+					break;
+				}
+				case MACTransmitKind.Multicast: {
+					throw new Error("No multicast support yet!");
+				}
+				case MACTransmitKind.Broadcast: {
+					mpdu = new SinglecastLongRangeMPDU({
+						homeId: options.homeId,
+						ackRequested: false,
+						sourceNodeId: options.sourceNodeId,
+						destinationNodeId: NODE_ID_BROADCAST_LR,
+						sequenceNumber,
+						txPower: advertisedTXPower,
+						noiseFloor: advertisedNoiseFloor,
+					});
+					break;
+				}
+			}
+		}
+
+		// ITU-T G.9959 (01/2015): a transmitting node which receives an ACK MPDU shall
+		// accept the sequence number value zero in 2-channel configurations. This
+		// exception covers ACK MPDUs, so other frames must match the exact number
+		const ackSequenceNumberMatches = (m: MPDU) =>
+			m.sequenceNumber === mpdu.sequenceNumber
+			|| (m.sequenceNumber === 0
+				&& headerFormat === ProtocolHeaderFormat.Classic2Channel);
+
+		// The MPDU keeps its beaming information at "no beam". G.9959 §8.1.3.3.6:
+		// "The beaming information sub-field shall advertise the capability of a
+		// sending FL node to be awakened by a beam if it is asleep", and we send as
+		// an always listening node
+		if (beam) {
+			const outcome = await this.wakeDestination(
+				this.phyLayer,
+				options,
+				beam,
+				protocol,
+				headerFormat,
+				radioTXPower,
+			);
+			if ("result" in outcome) return { result: outcome.result };
+
+			// A beam blocks for up to three seconds, long enough for destroy() to
+			// clear the PHY layer underneath us
+			if (this.wasDestroyed) {
+				return { result: MACTransmitResult.Error_Aborted };
+			}
+
+			if (outcome.pinnedChannel) {
+				// The destination listens only on the channel the beam went out
+				// on. Keep the planned number of attempts, so Long Range still
+				// gets its secondary-channel retries from §6.5.1.5.4
+				const channel = outcome.pinnedChannel;
+				attempts = attempts.map(() => ({
+					channel: () => channel,
+					// Every attempt goes out at the rate the destination
+					// listens with
+					speedModified: false,
+				}));
+			}
+		}
+
+		let busyAttempts = 0;
+		let sawSilentAck = false;
+		const isLongRange = headerFormat === ProtocolHeaderFormat.LongRange;
+		// How long to back off before the next transmit attempt. Classic Z-Wave
+		// waits this long between attempts. Long Range continues the ack wait
+		// during the backoff
+		let backoff = 0;
+
+		for (let attempt = 0; attempt < attempts.length; attempt++) {
+			sawSilentAck = false;
+
+			if (backoff > 0) {
+				// G.9959 §8.1.5.1.4.3: "Before retransmitting, the node shall wait for
+				// a random backoff period"
+				await wait(backoff);
+				if (this.wasDestroyed) {
+					return { result: MACTransmitResult.Error_Aborted };
+				}
+			}
+			backoff = randomRetransmitDelay(isLongRange);
+
+			// Beam again before each retry, because a continuous beam only keeps
+			// the destination awake for its own duration. Z-Wave MAC Layer Test
+			// Specification (2022/11/11), §3.51.3: "The Controller sends
+			// Continuous Beam followed by the singlecast until it times out."
+			// A node woken by a fragmented beam stays awake on its own
+			if (beam?.continuous && attempt > 0) {
+				const outcome = await this.wakeDestination(
+					this.phyLayer,
+					options,
+					beam,
+					protocol,
+					headerFormat,
+					radioTXPower,
+				);
+				if ("result" in outcome) return { result: outcome.result };
+				if (this.wasDestroyed) {
+					return { result: MACTransmitResult.Error_Aborted };
+				}
+			}
+
+			// Serializing an MPDU changes its payload property, so we set it here
+			// to the original data
+			mpdu.payload = Bytes.view(data);
+
+			// Update MPDU settings if necessary
+			const { speedModified, channel: getChannel } = attempts[attempt];
+			const channel = getChannel();
+			if ("speedModified" in mpdu) {
+				mpdu.speedModified = speedModified;
+			}
+
+			const ctx: MPDUEncodingContext = {
+				channel: channel.channel,
+				protocolDataRate: channel.dataRate,
+				region: this.phyLayer.regionConfig.region,
+			};
+			const frame = this.serializeOutbound(mpdu, ctx, replacements);
+
+			// G.9959 §8.1.5.1.4.3: "A node that sends a singlecast MPDU with its ACK
+			// request subfield set to 1 shall wait for a minimum of
+			// aMacMinAckWaitDuration symbols for the corresponding ACK MPDU to be
+			// received." The LR spec requires the same in §6.5.1.5.3 with
+			// aMacLRMinAckWaitDuration
+			const ackTimeout = ackWaitDuration(channel.dataRate, headerFormat);
+
+			// Each branch below must register its wait before calling
+			// `sendAndCheck`. The answer crosses the same serial connection as the
+			// transmit callback, so it can arrive before the transmit promise
+			// resolves
+			const answerAbort = new AbortController();
+			const sendAndCheck = async (): Promise<
+				MACTransmitReport | "retry" | undefined
+			> => {
+				const result = await this.sendFrame(frame, ctx, {
+					txPower: radioTXPower,
+					// G.9959 §8.1.5.1.2 requires clear channel assessment before
+					// transmitting a data frame
+					withCCA: options.withCCA ?? true,
+					replacements,
+				});
+				if (result === TransmitCallbackStatus.Completed) {
+					return undefined;
+				}
+
+				answerAbort.abort();
+				if (result === TransmitCallbackStatus.ChannelBusy) {
+					// TODO: Wait for channel to be free before retrying
+					busyAttempts++;
+					return "retry";
+				}
+				return { result: macResultFromTransmit(result) };
+			};
+
+			if (mpdu instanceof RoutedZWaveMPDU) {
+				const routedMPDU = mpdu;
+
+				// NWK:0180.1: repeater 0 repeating the frame is the silent acknowledgement
+				// of our transmission. Its repeat carries our source and destination, and
+				// travels between repeater 0 and the next hop
+				const isSilentAck = (m: MPDU) =>
+					m instanceof RoutedZWaveMPDU
+					&& m.homeId === routedMPDU.homeId
+					&& m.direction === "outbound"
+					&& m.sourceNodeId === routedMPDU.sourceNodeId
+					&& m.destinationNodeId === routedMPDU.destinationNodeId
+					&& m.hop === 1
+					&& m.repeaters.length === routedMPDU.repeaters.length
+					&& m.repeaters.every(
+						(r, i) => r === routedMPDU.repeaters[i],
+					)
+					&& m.sequenceNumber === routedMPDU.sequenceNumber;
+
+				const isRouteOutcome = (m: MPDU) =>
+					m instanceof RoutedZWaveMPDU
+					&& m.homeId === routedMPDU.homeId
+					&& (m.routedAck || m.routedError)
+					// Any hop > 0 is meant for a repeater
+					&& m.hop === 0
+					&& m.destinationNodeId === routedMPDU.sourceNodeId
+					// NWK:0190.1: "The repeater node sending the Routed Error Frame shall
+					// set the Source NodeID of the frame as the value of the Destination
+					// NodeID of the Routed Frame which delivery failed."
+					&& m.sourceNodeId === routedMPDU.destinationNodeId
+					&& m.sequenceNumber === routedMPDU.sequenceNumber;
+
+				const duration = frameDuration(
+					frame.length,
+					ctx.protocolDataRate,
+					headerFormat,
+				);
+				// The silent ack is a full repeat of the frame, so it needs the air time of
+				// one frame on top of the ack wait duration
+				const silentAckTimeout = ackTimeout + duration;
+				// A routed ack can arrive without us having seen the silent ack, so both are
+				// awaited together until the entire route budget has elapsed
+				const budget =
+					silentAckTimeout
+					+ routedAckTimeout(routedMPDU.repeaters.length, duration);
+
+				const firstAnswer = this.waitForMPDU<RoutedZWaveMPDU>(
+					(m) => isSilentAck(m) || isRouteOutcome(m),
+					undefined,
+					answerAbort.signal,
+				).then(
+					(m) => m,
+					() => undefined,
+				);
+
+				const failure = await sendAndCheck();
+				if (failure === "retry") continue;
+				if (failure) return failure;
+
+				// The budget starts when the radio reports the frame was sent
+				const deadline = Date.now() + budget;
+				let outcome = await Promise.race([
+					firstAnswer,
+					wait(budget).then(() => undefined),
+				]);
+
+				if (outcome && isSilentAck(outcome)) {
+					sawSilentAck = true;
+					// The frame is on its way. Wait for the destination to answer with a routed
+					// acknowledgement, or for a repeater to report that the route is broken
+					outcome = await this.waitForMPDU<RoutedZWaveMPDU>(
+						isRouteOutcome,
+						Math.max(0, deadline - Date.now()),
+					).then(
+						(m) => m,
+						() => undefined,
+					);
+				}
+
+				if (!outcome) {
+					// Drop the wait entry the race left behind
+					answerAbort.abort();
+					continue;
+				}
+
+				if (outcome.routedError) {
+					// Attempts on a route a repeater just reported as broken are unlikely to
+					// succeed, so we let the caller pick a different route
+					return {
+						result: MACTransmitResult.RoutedError,
+						failedHop: outcome.failedHop,
+					};
+				}
+
+				return {
+					result: MACTransmitResult.OK,
+					repeaterRSSI: outcome.repeaterRSSI,
+				};
+			}
+
+			// LR §6.5.1.5.5: "If an Ack MPDU is received within the random backoff
+			// period and contains the correct HomeID, source NodeID and a matching
+			// sequence number, the transmission is considered successful." So LR keeps
+			// listening through the backoff, which then no longer delays the retry
+			const ackWindow = isLongRange ? ackTimeout + backoff : ackTimeout;
+			if (isLongRange) backoff = 0;
+
+			// G.9959 §8.1.5.1.4.3: "If an ACK MPDU is received within
+			// aMacMinAckWaitDuration symbols and contains the correct HomeID and
+			// source NodeID, the transmission is considered successful"
+			const ackPromise = mpdu.ackRequested
+				? this.waitForMPDU(
+						(m) =>
+							m.headerType === MPDUHeaderType.Acknowledgement
+							&& m.homeId === mpdu.homeId
+							// TODO: This cast is not sound
+							&& m.sourceNodeId
+								=== (mpdu as SinglecastZWaveMPDU)
+									.destinationNodeId
+							&& ackSequenceNumberMatches(m),
+						undefined,
+						answerAbort.signal,
+					).then(
+						() => true,
+						() => false,
+					)
+				: undefined;
+
+			const failure = await sendAndCheck();
+			if (failure === "retry") continue;
+			if (failure) return failure;
+
+			if (ackPromise == undefined) {
+				return { result: MACTransmitResult.OK };
+			}
+
+			// The ack window starts when the radio reports the frame was sent
+			const acked = await Promise.race([
+				ackPromise,
+				wait(ackWindow).then(() => false),
+			]);
+			if (acked) return { result: MACTransmitResult.OK };
+			// Drop the wait entry the race left behind
+			answerAbort.abort();
+		}
+
+		if (busyAttempts === attempts.length) {
+			return { result: MACTransmitResult.ChannelBusy };
+		}
+
+		// The last attempt reached the route, so the destination or a repeater dropped it
+		if (sawSilentAck) return { result: MACTransmitResult.NoRoutedAck };
+
+		return { result: MACTransmitResult.NoAck };
+	}
+
+	// FIXME: Merge logic with transmit()
+	public async transmitACK(
+		options: MACTransmitAckOptions,
+	): Promise<MACTransmitResult> {
+		if (this.phyLayer == undefined) {
+			throw new ZWaveError(
+				`The PHY layer has not been initialized yet!`,
+				ZWaveErrorCodes.Driver_NotReady,
+			);
+		}
+
+		if (this.phyLayer.regionConfig == undefined) {
+			throw new ZWaveError(
+				`The current region is not known yet`,
+				ZWaveErrorCodes.Driver_NotReady,
+			);
+		}
+
+		const txPower = options.txPower;
+		assertRadioTXPower(txPower, this.phyLayer.txPowerRange);
+		if (options.protocol === Protocols.ZWaveLongRange) {
+			assertInt8(
+				options.lrMpduOverrides?.txPower,
+				"The advertised TX power",
+			);
+			assertInt8(options.incomingRSSI, "The incoming RSSI");
+			assertInt8(
+				options.lrMpduOverrides?.noiseFloor,
+				"The advertised noise floor",
+			);
+		}
+
+		let mpdu: MPDU;
+		if (options.protocol === Protocols.ZWave) {
+			mpdu = new AckZWaveMPDU({
+				homeId: options.homeId,
+				sourceNodeId: options.sourceNodeId,
+				destinationNodeId: options.destinationNodeId,
+				sequenceNumber: options.sequenceNumber,
+			});
+		} else {
+			mpdu = new AckLongRangeMPDU({
+				homeId: options.homeId,
+				sourceNodeId: options.sourceNodeId,
+				destinationNodeId: options.destinationNodeId,
+				sequenceNumber: options.sequenceNumber,
+				// The MPDU TX Power field is an int8, while the radio accepts
+				// 0.1 dBm steps
+				txPower:
+					options.lrMpduOverrides?.txPower ?? Math.round(txPower),
+				incomingRSSI: options.incomingRSSI ?? RssiError.NotAvailable,
+				noiseFloor: await this.getAdvertisedNoiseFloor(
+					options.protocol,
+					options.lrMpduOverrides?.noiseFloor,
+					options.channel,
+				),
+			});
+		}
+
+		const replacements = this.getNoiseFloorReplacements(
+			options.protocol,
+			options.protocol === Protocols.ZWaveLongRange
+				? options.lrMpduOverrides?.noiseFloor
+				: undefined,
+		);
+
+		const channel = options.channel;
+		const ctx: MPDUEncodingContext = {
+			channel,
+			protocolDataRate: this.getProtocolDataRateOrThrow(channel),
+			region: this.phyLayer.regionConfig.region,
+		};
+
+		const result = await this.sendMPDU(mpdu, ctx, {
+			txPower,
+			// Acks are exempt from clear channel assessment, so they can be sent
+			// within the turnaround time
+			withCCA: false,
+			replacements,
+		});
+
+		return macResultFromTransmit(result);
+	}
+
+	/** Send the acknowledgements a received frame asks for, in the order they have to go out */
+	private async acknowledgeReceivedFrame(
+		mpdu: SinglecastZWaveMPDU | RoutedZWaveMPDU | SinglecastLongRangeMPDU,
+		info: MpduRxInfo,
+		ownNodeId: number,
+	): Promise<void> {
+		// ITU-T G.9959 (01/2015), §8.1.3.3.2: "A receiving node shall return an ACK MPDU
+		// in response to the ACK request." This includes the last hop of a routed frame,
+		// where NWK:0180.1 only recommends that the repeater leaves ACK Req clear.
+		// NWK:0182.1: "The repeater 0 node shall request an ACK MPDU to the destination
+		// NodeID when it repeats a Routed NPDU with the Direction field set to 1 (Routed
+		// Error or Routed Acknowledgement frame)."
+		if (mpdu.ackRequested) {
+			this.protocolLog.print("Acknowledging incoming frame", "verbose");
+
+			await this.transmitACK({
+				homeId: mpdu.homeId,
+				// For a routed ack or error, this is the spoofed source of the frame,
+				// which repeater 0 accepts as the address of its own repeat
+				destinationNodeId: mpdu.sourceNodeId,
+				sourceNodeId: ownNodeId,
+				channel: info.channel,
+				sequenceNumber: mpdu.sequenceNumber,
+				txPower: this.getSafeAutoAckTXPower(),
+				...(mpdu instanceof LongRangeMPDU
+					? {
+							protocol: Protocols.ZWaveLongRange,
+							incomingRSSI: advertisedRSSI(info.rssi),
+						}
+					: {
+							protocol: Protocols.ZWave,
+						}),
+			});
+		}
+
+		if (isFinalHopOfRoutedFrame(mpdu)) {
+			this.protocolLog.print(
+				"Acknowledging incoming routed frame",
+				"verbose",
+			);
+
+			const result = await this.transmitRoutedAck(mpdu, info.channel);
+			if (result !== MACTransmitResult.OK) {
+				// The originator reports NoRoutedAck when this does not go out,
+				// so log why it failed on this end
+				this.protocolLog.print(
+					`Failed to acknowledge incoming routed frame: ${getEnumMemberName(
+						MACTransmitResult,
+						result,
+					)}`,
+					"warn",
+				);
+			}
+		}
+	}
+
+	/**
+	 * Answer a routed frame that has reached us with a routed acknowledgement.
+	 * Must only be called for a frame whose last repeater has transmitted to us.
+	 */
+	private async transmitRoutedAck(
+		frame: RoutedZWaveMPDU,
+		channel: number,
+	): Promise<MACTransmitResult> {
+		if (this.phyLayer?.regionConfig == undefined) {
+			throw new ZWaveError(
+				`The current region is not known yet`,
+				ZWaveErrorCodes.Driver_NotReady,
+			);
+		}
+
+		if (this.ownNodeId == undefined) {
+			throw new ZWaveError(
+				`The own node ID is not known yet`,
+				ZWaveErrorCodes.Driver_NotReady,
+			);
+		}
+
+		const region = this.phyLayer.regionConfig.region;
+		const protocolDataRate = this.getProtocolDataRateOrThrow(channel);
+		const headerFormat = getProtocolHeaderFormatForDataRate(
+			region,
+			protocolDataRate,
+		);
+
+		// Z-Wave and Z-Wave Long Range Network Layer Specification (2023.05.26),
+		// NWK:0183.1: "A node receiving a Routed Frame shall return a Routed
+		// Acknowledgement using the same route as in the received Routed Frame."
+		const mpdu = new RoutedZWaveMPDU({
+			homeId: frame.homeId,
+			headerType:
+				headerFormat === ProtocolHeaderFormat.Classic3Channel
+					? MPDUHeaderType.Routed
+					: MPDUHeaderType.Singlecast,
+			routed: true,
+			// NWK:0180.1 applies to the routed ack too, the last repeater's repeat
+			// serves as the silent acknowledgement
+			ackRequested: false,
+			sourceNodeId: this.ownNodeId,
+			destinationNodeId: frame.sourceNodeId,
+			sequenceNumber: frame.sequenceNumber,
+			// NWK:000D.1: "The 'Speed Modified' subfield from the MPDU Frame Control
+			// [G.9959] shall be ignored and this field shall be used instead when a
+			// routing header is present." The return path runs at the speed the frame
+			// arrived with
+			speedModified: frame.speedModified,
+			direction: "inbound",
+			routedAck: true,
+			routedError: false,
+			repeaters: frame.repeaters,
+			// The ack travels back over the hop the frame just arrived on
+			hop: frame.repeaters.length,
+			// NWK:0037.1: "A Routed Acknowledgement frame shall not comprise a DLPDU
+			// data payload."
+			payload: undefined,
+			// NWK:018E.1: "A node using Channel Configuration 3 shall set the
+			// Destination Wake Up field to 0 when transmitting to an AL node."
+			// NWK:0038.1: "A node returning a Routed Acknowledgement shall not include
+			// the Destination Wake Up Extension."
+			destinationWakeup: false,
+			// NWK:0039.1: "A node returning a Routed Acknowledgement should include the
+			// Incoming Routed RSSI Extension. If using the Incoming Routed RSSI
+			// Extension, a sending node shall set the repeater 0..4 values to 0x7F."
+			repeaterRSSI: [
+				RssiError.NotAvailable,
+				RssiError.NotAvailable,
+				RssiError.NotAvailable,
+				RssiError.NotAvailable,
+			],
+		});
+
+		const ctx: MPDUEncodingContext = {
+			channel,
+			protocolDataRate,
+			region,
+		};
+
+		const result = await this.sendMPDU(mpdu, ctx, {
+			txPower: this.getSafeAutoAckTXPower(),
+			// G.9959 §8.1.5.1.2 requires clear channel assessment before
+			// transmitting a data frame
+			withCCA: true,
+		});
+
+		return macResultFromTransmit(result);
+	}
+
+	private handleReceivedMPDU(mpdu: MPDU, info: MpduRxInfo): void {
+		if (this.phyLayer == undefined) {
+			throw new ZWaveError(
+				`The PHY layer has not been initialized yet!`,
+				ZWaveErrorCodes.Driver_NotReady,
+			);
+		}
+
+		if (this.phyLayer.regionConfig == undefined) {
+			throw new ZWaveError(
+				`The current region is not known yet`,
+				ZWaveErrorCodes.Driver_NotReady,
+			);
+		}
+
+		const logContext: MPDULogContext = {
+			region: this.phyLayer.regionConfig.region,
+			...info,
+		};
+
+		this.protocolLog.mpdu(mpdu, logContext, "inbound");
+
+		let mustHandle = false;
+
+		// Check if this is a frame we need to acknowledge
+		if (mpdu.homeId === this.ownHomeId) {
+			// This is a frame from our network
+
+			// Any valid LR frame addressed to us updates the primary channel, acks
+			// included. Z-Wave Long Range PHY and MAC Layer Specification
+			// (2023.07.03), §6.5.1.4: "When a node receives a frame on channel X and
+			// the MAC layer has validated the frame, and has a match on HomeID and
+			// NodeID then the node shall set its Primary channel to channel X."
+			if (
+				this.ownNodeId != undefined
+				&& mpdu instanceof LongRangeMPDU
+				&& mpdu.destinationNodeId === this.ownNodeId
+			) {
+				this.primaryLongRangeChannel = info.channel;
+			}
+
+			if (
+				this.ownNodeId != undefined
+				&& (mpdu instanceof SinglecastZWaveMPDU
+					|| mpdu instanceof RoutedZWaveMPDU
+					|| mpdu instanceof SinglecastLongRangeMPDU)
+				&& mpdu.destinationNodeId === this.ownNodeId
+			) {
+				// This is a frame addressed to us
+				if (
+					this.autoAck
+					&& (mpdu.ackRequested || isFinalHopOfRoutedFrame(mpdu))
+				) {
+					// A failed ACK behaves like a lost ACK, so it only needs to be logged
+					this.acknowledgeReceivedFrame(
+						mpdu,
+						info,
+						this.ownNodeId,
+					).catch((e) => {
+						this.protocolLog.print(
+							`Failed to acknowledge incoming frame: ${getErrorMessage(
+								e,
+							)}`,
+							"error",
+						);
+					});
+				} else {
+					mustHandle = true;
+				}
+			}
+		}
+
+		// Check if we have a dynamic handler waiting for this mpdu
+		for (const entry of this.awaitedMPDUs) {
+			if (entry.predicate(mpdu)) {
+				// We do
+				entry.handler(mpdu);
+				return;
+			}
+		}
+
+		// We don't...
+		if (mustHandle) {
+			this.protocolLog.print(
+				`TODO: No handler for received frame`,
+				"warn",
+			);
+		}
+	}
+
+	/**
+	 * Waits until an MPDU matching the predicate is received or a timeout has elapsed. Returns the received message.
+	 * @param timeout The number of milliseconds to wait. If the timeout elapses, the returned promise will be rejected
+	 * @param predicate A predicate function to test all incoming messages.
+	 * @param refreshPredicate A predicate function to test partial messages. If this returns `true` for a message, the timer will be restarted.
+	 */
+	public waitForMPDU<T extends MPDU>(
+		predicate: (mpdu: MPDU) => boolean,
+		timeout?: number,
+		abortSignal?: AbortSignal,
+	): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			const promise = createDeferredPromise<MPDU>();
+			const entry: AwaitedMPDUEntry = {
+				predicate,
+				handler: (msg) => promise.resolve(msg),
+				timeout: undefined,
+			};
+			this.awaitedMPDUs.push(entry);
+			const removeEntry = () => {
+				entry.timeout?.clear();
+				abortSignal?.removeEventListener("abort", removeEntry);
+				const index = this.awaitedMPDUs.indexOf(entry);
+				if (index !== -1) this.awaitedMPDUs.splice(index, 1);
+			};
+			// When the timeout elapses, remove the wait entry and reject the returned Promise
+			if (timeout) {
+				entry.timeout = setTimer(() => {
+					removeEntry();
+					reject(
+						new ZWaveError(
+							`Received no matching message within the provided timeout!`,
+							ZWaveErrorCodes.Controller_Timeout,
+						),
+					);
+				}, timeout);
+			}
+			// When the promise is resolved, remove the wait entry and resolve the returned Promise
+			void promise.then((cc) => {
+				removeEntry();
+				resolve(cc as T);
+			});
+			// When the abort signal is used, silently remove the wait entry
+			abortSignal?.addEventListener("abort", removeEntry);
+		});
+	}
+
+	public async destroy(): Promise<void> {
+		// Ensure this is only called once and all subsequent calls block
+		if (this._destroyPromise) return this._destroyPromise;
+		this._destroyPromise = createDeferredPromise();
+
+		this.protocolLog.print("Destroying protocol controller...");
+
+		if (this.phyLayer) {
+			this.phyLayer.removeAllListeners();
+			await this.phyLayer.destroy();
+			this.phyLayer = undefined;
+		}
+
+		// Remove all timeouts
+		for (const timeout of this.awaitedMPDUs.map((m) => m.timeout)) {
+			timeout?.clear();
+		}
+
+		this.protocolLog.print("protocol controller destroyed");
+
+		// destroy loggers as the very last thing
+		this._logContainer.destroy();
+
+		this._destroyPromise.resolve();
+	}
+}

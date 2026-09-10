@@ -4,6 +4,97 @@
 <!--
 	Add placeholder for next release with `wip` snippet
 -->
+## 15.29.0 (2026-09-10)
+### Features
+* Redundant and superseded commands are now automatically deduplicated. The corresponding API calls can now be aborted or will share a single transaction, depending on the specific situation (#9136, #9137)
+* The new `lastAwake` property now indicates when a node was last awake. This information is persisted across restarts (#9173)
+* Some "invalid payload" warning logs now include the node ID (#9196)
+
+### Bugfixes
+* Notification Reports with event `0xfe` in response to a Get now idle the corresponding notification variables (#9160, #9174)
+* Fixed an issue where regular RSSI measurements could interfere with automatic polling (wakeup compat queries, Hail, etc.) if the commands were slow (#9183)
+
+### Config file changes
+* Add Aeotec ZWA056 Water Sensor 8 (#9161)
+* Restrict ZWA055 Basic Set values to the legal value set, correct template key (#9208)
+* Add Aeotec ZWA065 Siren 8 (#9207)
+* Add Aeotec ZWA057 aërQ Temperature and Humidity Sensor 8 (#9206)
+* Add Aeotec ZWA055 Door / Window Sensor 8 (#9089)
+* Update Inovelli VZW32-SN P50, P107 for firmware 2.4 (#9187)
+* Add Zooz ZEN12 800LR Motion Dimmer (#9181)
+* Add Zooz ZEN37 parameter 10 for firmware 2.40 (#9180)
+* Add "Off" option for Heatit Z-TRM7 standby display brightness (#9177)
+* Update Zooz configs for new firmware parameters (#9175)
+* Add Simon 100 Battery Master Roller Blind (#9158)
+* Update Inovelli VZW32-SN P111 to match public docs (#9116)
+
+### Changes under the hood
+* Add AI contribution policy (#9189)
+* Switched the formatter from `dprint` to `oxfmt` (#8596, #9191, #9197, #9202)
+* Migrate syntax-only custom rules to Oxlint (#9203)
+* Improve Copilot review capabilities (#9198, #9200, #9201)
+
+## 15.28.0 (2026-08-28)
+### Features
+* Significantly improved capabilities of the experimental RCP firmware driver (#9076, #9077, #9078, #9080, #9081, #9083, #9087, #9088, #9090)
+* Read bootloader version from Nabu Casa controllers during the interview (#9095)
+* When querying the firmware update service, additional chips' firmware versions are also passed (#9110)
+* Zniffer can now parse PTI captures from Z-Wave CTT (#9148)
+* The `Manufacturer Specific Device Specific Get` command is now answered correctly. If desired, you can pass a device ID in the driver options, which will be used in the response (#9151)
+
+### Bugfixes
+* When destroying the driver instance, abort Serial API commands that are waiting for an ACK (#9099)
+* Do not retry commands when destroying the driver instance (#9100)
+* The `listening` flag in the `SerialAPIStarted` command is now parsed correctly (#9102)
+* The controller NIF is now set on every startup, preventing controllers from incorrectly behaving like a sleeping node (#9105)
+* Prevent the OTW firmware update from aborting itself when entering the bootloader (#9108)
+* Fixed a bug where `Driver.ready` was not reset when entering bootloader or CLI mode (#9109)
+* Fixed an issue on Windows where SONOFF controllers could end up in the bootloader during Z-Wave JS's startup (#9118)
+* Correct signal-to-noise margin units from dBm to dB (#9131)
+* Association Group Information command list reports now serialize without trailing bytes (#9146)
+* Fixed an issue where nodes that were excluded by an inclusion controller would not be removed from Z-Wave JS's node list (#9149)
+* Fixed a regression where the `S0 Commands Supported Get` command was not answered on S2-capable nodes (#9150)
+* Fix: parsing a `Door Lock CC Configuration Report` could crash due to an incorrect length check (#9155)
+* Parsed `CommandClass` instances now preserve the frame type (singlecast/multicast/broadcast) of the incoming command (#9147)
+* Ignore report fields that are only valid on higher CC versions than the node advertised support for (#9154)
+
+### Config file changes
+* Fix malformed notifications sent by HomeSeer FS100 devices (#9140)
+* Add labels to several endpoints, add tools to discover them (#9096)
+* Correct external sensor resistance options on Heatit Z-TRM7 (#9129)
+* Add fingerprint `0x0c02:0x3002` to "Fibargroup FGSD-002" (#9114)
+* Update Zooz ZEN32 config for firmware 3.30 (#9097)
+
+## 15.27.1 (2026-08-14)
+### Bugfixes
+* Limit Z-Wave.me proprietary `GetRegion` command to firmware 5.3+ (#9093)
+
+### Config file changes
+* Add fingerprint to Climax SDCO (#9075)
+
+## 15.27.0 (2026-08-07)
+### Features
+* Added support for opening Zniffer traces that were captured by a PTI Zniffer (#9053)
+
+### Bugfixes
+* Updated a few instances where env variables were read directly instead of through `getenv` (#9015)
+* Keep the DRBG key and counter in separate buffers (#9014)
+* Fixed an issue where zero-valued enums were not deserialized from the network cache correctly (#9013)
+* Fixed a race condition where the driver could attempt to persist CC values after the value DB was closed (#9038)
+* Supervised Notification Reports with unparsable event parameters are now answered with supervision status `Fail` instead of being silently dropped (#9049)
+* Proceed with User Code CC interview when User Credential CC capabilities are unknown (#9068)
+
+### Config file changes
+* Add Heatit Z-TRM7 and standardize Heatit config parameters across devices (#8995, #8997)
+* Add productId 0x5600 for YRM276 with ZW3 module (700 series) (#9002)
+* Remove Multi Channel CC support for Vero Duco CO2 sensor (#9036)
+* Update manual URL for Lamp-ZW2 (#9070)
+
+### Changes under the hood
+* Fixed several problems with the local development workflow (#8983, #8984)
+* Fix flaky Transport Service SegmentComplete test (#9023)
+* Low-level protocol primitives have been moved from the Zniffer into `@zwave-js/core`, enabling custom driver implementations that do not use the Serial API (#9055, #9056)
+
 ## 15.26.0 (2026-07-17)
 ### Features
 * Added support for proprietary controller commands on Aeotec and Z-Wave.me controllers (#8949)

@@ -80,12 +80,15 @@ interface ZWaveNotificationCapability_NotificationCC {
 	commandClass: CommandClasses.Notification;
 	endpoint: number;
 	/** A dictionary of supported event types and information */
-	supportedNotificationTypes: Record<number, {
-		/** The human-readable label for the notification type */
-		label: string;
-		/** A dictionary of supported events for this notification type and their human-readable labels */
-		supportedEvents: Record<number, string>;
-	}>;
+	supportedNotificationTypes: Record<
+		number,
+		{
+			/** The human-readable label for the notification type */
+			label: string;
+			/** A dictionary of supported events for this notification type and their human-readable labels */
+			supportedEvents: Record<number, string>;
+		}
+	>;
 }
 ```
 
@@ -195,11 +198,11 @@ To make it easier for applications to test the status, a few helper methods are 
 
 - `setValueSucceeded(result: SetValueResult)` returns whether the command was sent using supervision and the device either executed it or started working on it
 - `setValueWasUnsupervisedOrSucceeded(result: SetValueResult)` returns whether:
-  - the above applies
-  - or the command was sent without supervision and was acknowledged (but not necessarily executed) by the device
+    - the above applies
+    - or the command was sent without supervision and was acknowledged (but not necessarily executed) by the device
 - `setValueFailed(result: SetValueResult)` returns whether:
-  - the command was either not sent due to an error
-  - or the command was sent using supervision and the device indicated an error
+    - the command was either not sent due to an error
+    - or the command was sent using supervision and the device indicated an error
 
 ### `pollValue`
 
@@ -357,23 +360,23 @@ Retrieves the firmware update capabilities of a node to decide which options (e.
 ```ts
 type FirmwareUpdateCapabilities =
 	| {
-		/** Indicates whether the node's firmware can be upgraded */
-		readonly firmwareUpgradable: false;
-	}
+			/** Indicates whether the node's firmware can be upgraded */
+			readonly firmwareUpgradable: false;
+	  }
 	| {
-		/** Indicates whether the node's firmware can be upgraded */
-		readonly firmwareUpgradable: true;
-		/** An array of firmware targets that can be upgraded */
-		readonly firmwareTargets: readonly number[];
-		/** Indicates whether the node continues to function normally during an upgrade */
-		readonly continuesToFunction: MaybeNotKnown<boolean>;
-		/** Indicates whether the node supports delayed activation of the new firmware */
-		readonly supportsActivation: MaybeNotKnown<boolean>;
-		/** Indicates whether the node supports resuming aborted firmware transfers */
-		readonly supportsResuming: MaybeNotKnown<boolean>;
-		/** Indicates whether the node supports non-secure firmware transfers */
-		readonly supportsNonSecureTransfer: MaybeNotKnown<boolean>;
-	};
+			/** Indicates whether the node's firmware can be upgraded */
+			readonly firmwareUpgradable: true;
+			/** An array of firmware targets that can be upgraded */
+			readonly firmwareTargets: readonly number[];
+			/** Indicates whether the node continues to function normally during an upgrade */
+			readonly continuesToFunction: MaybeNotKnown<boolean>;
+			/** Indicates whether the node supports delayed activation of the new firmware */
+			readonly supportsActivation: MaybeNotKnown<boolean>;
+			/** Indicates whether the node supports resuming aborted firmware transfers */
+			readonly supportsResuming: MaybeNotKnown<boolean>;
+			/** Indicates whether the node supports non-secure firmware transfers */
+			readonly supportsNonSecureTransfer: MaybeNotKnown<boolean>;
+	  };
 ```
 
 ### `updateFirmware`
@@ -655,7 +658,7 @@ interface LifelineHealthCheckResult {
 	failedPingsController?: number;
 
 	/**
-	 * An estimation of the Signal-to-Noise Ratio Margin in dBm.
+	 * An estimation of the Signal-to-Noise Ratio Margin in dB.
 	 *
 	 * Only available if the controller supports TX reports.
 	 */
@@ -670,9 +673,9 @@ The health rating is computed similar to Silabs' PC Controller IMA tool where 10
 
 | Rating | Failed pings |   Latency | No. of neighbors | min. powerlevel | SNR margin |
 | -----: | -----------: | --------: | ---------------: | --------------: | ---------: |
-|  ✅ 10 |            0 |   ≤ 50 ms |              > 2 |        ≤ −6 dBm |   ≥ 17 dBm |
-|   🟢 9 |            0 |  ≤ 100 ms |              > 2 |        ≤ −6 dBm |   ≥ 17 dBm |
-|   🟢 8 |            0 |  ≤ 100 ms |              ≤ 2 |        ≤ −6 dBm |   ≥ 17 dBm |
+|  ✅ 10 |            0 |   ≤ 50 ms |              > 2 |        ≤ −6 dBm |    ≥ 17 dB |
+|   🟢 9 |            0 |  ≤ 100 ms |              > 2 |        ≤ −6 dBm |    ≥ 17 dB |
+|   🟢 8 |            0 |  ≤ 100 ms |              ≤ 2 |        ≤ −6 dBm |    ≥ 17 dB |
 |   🟢 7 |            0 |  ≤ 100 ms |              > 2 |               - |          - |
 |   🟢 6 |            0 |  ≤ 100 ms |              ≤ 2 |               - |          - |
 |        |              |           |                  |                 |            |
@@ -929,6 +932,14 @@ readonly lastSeen: MaybeNotKnown<Date>
 
 This property tracks when the node was last seen, meaning a command was either received from the node or successfully sent to it.
 
+### `lastAwake`
+
+```ts
+readonly lastAwake: MaybeNotKnown<Date>
+```
+
+This property tracks when the node last sent a Wake Up notification, so it is only known for nodes that can sleep. Like `lastSeen`, it is preserved across restarts.
+
 ### `isControllerNode`
 
 ```ts
@@ -1170,7 +1181,7 @@ The Z-Wave protocol version this node implements.
 
 ```ts
 enum ProtocolVersion {
-	"unknown" = 0,
+	unknown = 0,
 	"2.0" = 1,
 	"4.2x / 5.0x" = 2,
 	"4.5x / 6.0x" = 3,
@@ -1531,7 +1542,7 @@ uses the following signature
 ```ts
 type ZWaveNotificationCallbackParams_BatteryCC = [
 	endpoint: Endpoint,
-	ccId: (typeof CommandClasses.Battery),
+	ccId: typeof CommandClasses.Battery,
 	args: ZWaveNotificationCallbackArgs_BatteryCC,
 ];
 ```

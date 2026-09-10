@@ -12,12 +12,19 @@ export const LOCAL_MODEL_REVISION = "751bff37182d3f1213fa05d7196b954e230abad9";
 export const LOCAL_MODEL_LICENSE = "Apache-2.0";
 export const LOCAL_MODEL_SOURCE =
 	"https://huggingface.co/Xenova/all-MiniLM-L6-v2";
+export const LOCAL_MODEL_DTYPE = "q8";
+export const LOCAL_MODEL_CACHE_KEY =
+	`${LOCAL_MODEL_ID}@${LOCAL_MODEL_REVISION}@${LOCAL_MODEL_DTYPE}`.replaceAll(
+		"/",
+		"_",
+	);
 /** Approximate size of the quantized (q8) ONNX weights plus tokenizer metadata */
 export const LOCAL_MODEL_APPROX_SIZE_MB = 24;
 export const LOCAL_MODEL_DIMENSIONS = 384;
 
 /** Bump when the embedding cache entry shape or the corpus normalization changes */
 export const EMBEDDING_SCHEMA_VERSION = 3;
+export const SEMANTIC_INDEX_CACHE_KEY = `semantic-index-${LOCAL_MODEL_CACHE_KEY}@v${EMBEDDING_SCHEMA_VERSION}`;
 
 export type LocalDownloadPolicy = "ask" | "allow" | "deny";
 
@@ -58,9 +65,9 @@ function parseEnum<T extends string>(
 	if (value == undefined || value === "") return fallback;
 	if ((allowed as readonly string[]).includes(value)) return value as T;
 	throw new SemanticEnvError(
-		`Invalid value "${value}" for ${envVar}. Expected one of: ${
-			allowed.join(", ")
-		}`,
+		`Invalid value "${value}" for ${envVar}. Expected one of: ${allowed.join(
+			", ",
+		)}`,
 	);
 }
 
@@ -84,11 +91,14 @@ export function parseSemanticEnv(
 			["ask", "allow", "deny"] as const,
 			"ask",
 		),
-		modelCacheDir: env.ZWAVE_DEV_SEMANTIC_MODEL_CACHE_DIR?.trim()
+		modelCacheDir:
+			env.ZWAVE_DEV_SEMANTIC_MODEL_CACHE_DIR?.trim()
 			|| defaultModelCacheDir(env),
-		indexCacheDir: env.ZWAVE_DEV_SEMANTIC_INDEX_CACHE_DIR?.trim()
+		indexCacheDir:
+			env.ZWAVE_DEV_SEMANTIC_INDEX_CACHE_DIR?.trim()
 			|| defaultIndexCacheDir(env),
-		consentFile: env.ZWAVE_DEV_SEMANTIC_CONSENT_FILE?.trim()
+		consentFile:
+			env.ZWAVE_DEV_SEMANTIC_CONSENT_FILE?.trim()
 			|| defaultConsentFile(env),
 	};
 }

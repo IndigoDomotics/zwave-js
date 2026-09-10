@@ -17,13 +17,16 @@ runs:
       run: corepack enable
 
     - name: Use Node.js ${{ inputs.node-version }}
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@v7
       with:
         node-version: ${{ inputs.node-version }}
         cache: 'yarn'
 
     - name: Install dependencies
       shell: bash
+      # Skip installing the git hooks, so jobs that commit are not subject to them
+      env:
+        HUSKY: 0
       run: |
         yarn install --immutable
         yarn bootstrap

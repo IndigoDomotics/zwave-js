@@ -1,13 +1,30 @@
-const path = require("path");
-const repoRoot = path.join(__dirname, "../..");
-
 /**
  * @param {string} filename
  * @param {string} sourceText
+ * @returns {Promise<string>}
  */
-function formatWithDprint(filename, sourceText) {
-	const { formatWithDprint: format } = require("@zwave-js/fmt");
-	return format(repoRoot, filename, sourceText);
+async function formatWithOxfmt(filename, sourceText) {
+	const { format } = await import("oxfmt");
+	const { code, errors } = await format(filename, sourceText, {
+		printWidth: 120,
+		tabWidth: 4,
+		useTabs: true,
+		semi: true,
+		singleQuote: false,
+		quoteProps: "as-needed",
+		trailingComma: "all",
+		bracketSpacing: true,
+		arrowParens: "always",
+		endOfLine: "lf",
+	});
+	if (errors.length) {
+		throw new Error(
+			errors
+				.map((error) => error.codeframe ?? error.message)
+				.join("\n\n"),
+		);
+	}
+	return code;
 }
 
 const urls = {
@@ -19,9 +36,6 @@ const urls = {
 const AUTO_ANALYSIS_COMMENT_TAG = "<!-- AUTO_ANALYSIS_COMMENT_TAG -->";
 const AUTO_ANALYSIS_START_TAG = "<!-- AUTO_ANALYSIS_START_TAG -->";
 const AUTO_ANALYSIS_END_TAG = "<!-- AUTO_ANALYSIS_END_TAG -->";
-
-const markdownLinkRegex = /\[.*\]\((http.*?)\)/;
-const codeBlockRegex = /`{3,4}(.*?)`{3,4}/s;
 
 /**
  * Check if a PR was modified after a specific comment using the timeline API.
@@ -89,10 +103,7 @@ async function wasPRModifiedAfterComment(
 	// Check 2: Are there any modification events with created_at >= comment time?
 	// This is a backup check in case the timeline ordering is not reliable
 	for (const event of events) {
-		if (
-			modificationEvents.includes(event.event)
-			&& "created_at" in event
-		) {
+		if (modificationEvents.includes(event.event) && "created_at" in event) {
 			const eventTime = new Date(event.created_at);
 			if (eventTime >= commentTime) {
 				return true;
@@ -104,87 +115,29 @@ async function wasPRModifiedAfterComment(
 }
 
 /**
- * Extract logfile section from discussion body
- * @param {string} body - Discussion body
- * @returns {string} - Logfile section content
+ * Returns when an issue was last transferred into this repository,
+ * or 0 if it was created here.
+ * @param {{event?: string, created_at?: string}[]} events - Timeline events
+ * @returns {number} Epoch milliseconds
  */
-function extractLogfileSection(body) {
-	const logfileSectionHeader = "### Upload Logfile";
-
-	if (!body.includes(logfileSectionHeader)) {
-		throw new Error("No logfile section found in discussion");
+function lastTransferTime(events) {
+	let transferredAt = 0;
+	for (const event of events) {
+		if (event.event !== "transferred" || !event.created_at) continue;
+		// Issues may be transferred repeatedly, only the last hop matters
+		transferredAt = Math.max(
+			transferredAt,
+			new Date(event.created_at).getTime(),
+		);
 	}
-
-	return body.slice(
-		body.indexOf(logfileSectionHeader) + logfileSectionHeader.length,
-	);
-}
-
-/**
- * Extract and validate URL from logfile section
- * @param {string} logfileSection - Logfile section content
- * @returns {string} - Valid logfile URL
- */
-function extractLogfileUrl(logfileSection) {
-	const linkMatch = markdownLinkRegex.exec(logfileSection);
-	if (!linkMatch || !linkMatch[1]) {
-		throw new Error("No valid logfile URL found in discussion");
-	}
-
-	const url = linkMatch[1].trim();
-
-	// Validate URL format
-	try {
-		return new URL(url).toString();
-	} catch (error) {
-		throw new Error(`Invalid URL format: ${url}`);
-	}
-}
-
-/**
- * Extract logfile content from logfile section (URL or code block)
- * @param {string} logfileSection - Logfile section content
- * @returns {Promise<string|null>} - Logfile content or error codes
- */
-async function extractLogfileContent(logfileSection) {
-	const link = markdownLinkRegex.exec(logfileSection)?.[1]?.trim();
-	const codeBlockContent = codeBlockRegex.exec(logfileSection)?.[1]?.trim();
-
-	if (link) {
-		try {
-			const resp = await fetch(link);
-			if (!resp.ok) {
-				console.error(
-					`Failed to fetch logfile from ${link}:`,
-					resp.statusText,
-				);
-				return "ERROR_FETCH";
-			}
-			const logFile = await resp.text();
-			// limit to the last 250 lines
-			return logFile.split("\n").slice(-250).join("\n");
-		} catch (e) {
-			console.error(`Failed to fetch logfile from ${link}:`, e);
-			return "ERROR_FETCH";
-		}
-	} else if (codeBlockContent) {
-		if (codeBlockContent.split("\n").length > 20) {
-			// This code block is too long and should be a logfile instead
-			return "ERROR_CODE_BLOCK_TOO_LONG";
-		}
-		return codeBlockContent;
-	}
-
-	return null;
+	return transferredAt;
 }
 
 module.exports = {
-	formatWithDprint,
+	formatWithOxfmt,
 	urls,
 	wasPRModifiedAfterComment,
-	extractLogfileSection,
-	extractLogfileUrl,
-	extractLogfileContent,
+	lastTransferTime,
 	AUTO_ANALYSIS_COMMENT_TAG,
 	AUTO_ANALYSIS_START_TAG,
 	AUTO_ANALYSIS_END_TAG,

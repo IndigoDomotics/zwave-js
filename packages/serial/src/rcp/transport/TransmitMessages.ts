@@ -1,0 +1,302 @@
+import {
+	type MessageOrCCLogEntry,
+	ZWaveError,
+	ZWaveErrorCodes,
+} from "@zwave-js/core";
+import { Bytes, type BytesView, getEnumMemberName } from "@zwave-js/shared";
+
+import { RCPFunctionType, RCPMessageType } from "../../message/Constants.js";
+import {
+	RCPMessage,
+	type RCPMessageBaseOptions,
+	type RCPMessageEncodingContext,
+	type RCPMessageParsingContext,
+	type RCPMessageRaw,
+	expectedRCPCallback,
+	expectedRCPResponse,
+	rcpMessageTypes,
+} from "../../message/RCPMessages.js";
+import type { SuccessIndicator } from "../../message/SuccessIndicator.js";
+
+export enum TransmitResponseStatus {
+	// The frame was successfully queued for transmission
+	Queued = 0x00,
+	// The TX FIFO is busy, cannot queue the frame
+	Busy = 0x01,
+	// The frame is too long to be transmitted
+	Overflow = 0x02,
+	// Invalid TX channel selected
+	InvalidChannel = 0x03,
+	// Other invalid parameters were passed
+	InvalidParam = 0x04,
+}
+
+export enum TransmitCallbackStatus {
+	// Underlying radio errors
+	Aborted = 0xf0,
+	Blocked = 0xf1,
+	Underflow = 0xf2,
+	ChannelBusy = 0xf3,
+	UnknownError = 0xfe,
+
+	// Transmission completed
+	Completed = 0xff,
+}
+
+/** TX power value that tells the firmware to keep its current setting */
+export const TX_POWER_KEEP_CURRENT = 0x7fff;
+
+/** Lowest TX power the int16 deci-dBm encoding can carry */
+const TX_POWER_MIN_DECI_DBM = -0x8000;
+/** Highest TX power the encoding can carry, one below the TX_POWER_KEEP_CURRENT sentinel */
+const TX_POWER_MAX_DECI_DBM = TX_POWER_KEEP_CURRENT - 1;
+
+/**
+ * Converts a TX power in dBm to the deci-dBm value to transmit, using the sentinel if none is given.
+ * The firmware expects an int16 BE in deci-dBm, which matches the units of `RAIL_SetTxPowerDbm`.
+ * Which powers the radio actually supports is up to the firmware to report.
+ */
+export function encodeTxPower(txPower: number | undefined): number {
+	if (txPower == undefined) return TX_POWER_KEEP_CURRENT;
+	const deciDbm = Math.round(txPower * 10);
+	// Number.isInteger also rejects NaN and Infinity
+	if (
+		!Number.isInteger(deciDbm)
+		|| deciDbm < TX_POWER_MIN_DECI_DBM
+		|| deciDbm > TX_POWER_MAX_DECI_DBM
+	) {
+		throw new ZWaveError(
+			`The TX power must be between ${TX_POWER_MIN_DECI_DBM / 10} and ${
+				TX_POWER_MAX_DECI_DBM / 10
+			} dBm`,
+			ZWaveErrorCodes.Argument_Invalid,
+		);
+	}
+	return deciDbm;
+}
+
+/** Formats a TX power in dBm for logging, with one decimal for fractional values */
+export function formatTxPower(txPower: number | undefined): string {
+	if (txPower == undefined) return "unchanged";
+	const rounded = Math.round(txPower * 10) / 10;
+	return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} dBm`;
+}
+
+/** Measurements the firmware can patch into the frame right before transmitting */
+export enum TransmitReplacementSource {
+	/** Noise floor on the TX channel, encoded like the LR MPDU RSSI fields */
+	NoiseFloor = 0x00,
+}
+
+export interface TransmitReplacement {
+	/** Position within the frame data to patch with the measurement */
+	offset: number;
+	source: TransmitReplacementSource;
+}
+
+/** Most replacements a single transmit may carry */
+export const MAX_TRANSMIT_REPLACEMENTS = 4;
+
+export interface TransmitRequestOptions {
+	channel: number;
+	/**
+	 * The transmit power in dBm, in steps of 0.1 dBm.
+	 * If omitted, the firmware keeps its current setting.
+	 */
+	txPower?: number;
+	/** Whether to perform clear channel assessment before transmitting */
+	withCCA: boolean;
+	/**
+	 * Byte positions the firmware patches with fresh measurements right before
+	 * the transmit. Only the listed bytes are replaced.
+	 */
+	replacements?: TransmitReplacement[];
+	data: BytesView;
+}
+
+enum TransmitFlags {
+	CCA = 0b1,
+	Replacements = 0b10,
+}
+
+@rcpMessageTypes(RCPMessageType.Request, RCPFunctionType.Transmit)
+@expectedRCPResponse(RCPFunctionType.Transmit)
+@expectedRCPCallback(RCPFunctionType.Transmit)
+export class TransmitRequest extends RCPMessage {
+	public constructor(
+		options: TransmitRequestOptions & RCPMessageBaseOptions,
+	) {
+		super(options);
+
+		this.channel = options.channel;
+		this.txPower = options.txPower;
+		this.withCCA = options.withCCA;
+		this.replacements = options.replacements;
+		this.data = options.data;
+	}
+
+	public channel: number;
+	public txPower: number | undefined;
+	public withCCA: boolean;
+	public replacements: TransmitReplacement[] | undefined;
+	public data: BytesView;
+
+	public serialize(ctx: RCPMessageEncodingContext): Promise<Bytes> {
+		if (
+			!Number.isInteger(this.channel)
+			|| this.channel < 0
+			|| this.channel > 0xff
+		) {
+			throw new ZWaveError(
+				`The channel must be an integer between 0 and 255`,
+				ZWaveErrorCodes.Argument_Invalid,
+			);
+		}
+
+		const replacements = this.replacements ?? [];
+		if (replacements.length > MAX_TRANSMIT_REPLACEMENTS) {
+			throw new ZWaveError(
+				`A transmit may carry at most ${MAX_TRANSMIT_REPLACEMENTS} replacements`,
+				ZWaveErrorCodes.Argument_Invalid,
+			);
+		}
+		for (const { offset } of replacements) {
+			if (
+				!Number.isInteger(offset)
+				|| offset < 0
+				|| offset >= this.data.length
+			) {
+				throw new ZWaveError(
+					`A replacement offset must be an integer within the frame data`,
+					ZWaveErrorCodes.Argument_Invalid,
+				);
+			}
+		}
+
+		// CHANNEL | TX_POWER (int16 BE, deci-dBm) | FLAGS | [NUM_REPLACEMENTS | (OFFSET | SOURCE)*] | ...DATA
+		const header = new Bytes(
+			4 + (replacements.length > 0 ? 1 + 2 * replacements.length : 0),
+		);
+		header[0] = this.channel;
+		header.writeInt16BE(encodeTxPower(this.txPower), 1);
+		header[3] =
+			(this.withCCA ? TransmitFlags.CCA : 0)
+			| (replacements.length > 0 ? TransmitFlags.Replacements : 0);
+		if (replacements.length > 0) {
+			header[4] = replacements.length;
+			for (let i = 0; i < replacements.length; i++) {
+				header[5 + 2 * i] = replacements[i].offset;
+				header[6 + 2 * i] = replacements[i].source;
+			}
+		}
+
+		this.payload = Bytes.concat([header, this.data]);
+
+		return super.serialize(ctx);
+	}
+
+	public toLogEntry(): MessageOrCCLogEntry {
+		const message: MessageOrCCLogEntry["message"] = {
+			channel: this.channel,
+			"TX power": formatTxPower(this.txPower),
+			CCA: this.withCCA,
+		};
+		if (this.replacements?.length) {
+			message.replacements = this.replacements
+				.map(
+					({ offset, source }) =>
+						`${getEnumMemberName(
+							TransmitReplacementSource,
+							source,
+						)} @ ${offset}`,
+				)
+				.join(", ");
+		}
+		message.data = `(${this.data.length} bytes)`;
+		return {
+			...super.toLogEntry(),
+			message,
+		};
+	}
+}
+
+export interface TransmitResponseOptions {
+	status: TransmitResponseStatus;
+}
+
+@rcpMessageTypes(RCPMessageType.Response, RCPFunctionType.Transmit)
+export class TransmitResponse extends RCPMessage implements SuccessIndicator {
+	public constructor(
+		options: TransmitResponseOptions & RCPMessageBaseOptions,
+	) {
+		super(options);
+		this.status = options.status;
+	}
+
+	public static from(
+		raw: RCPMessageRaw,
+		_ctx: RCPMessageParsingContext,
+	): TransmitResponse {
+		const status = raw.payload[0];
+
+		return new this({
+			status,
+		});
+	}
+
+	public status: TransmitResponseStatus;
+
+	isOK(): boolean {
+		// A successful response is indicated by the "Queued" status
+		return this.status === TransmitResponseStatus.Queued;
+	}
+
+	public toLogEntry(): MessageOrCCLogEntry {
+		return {
+			...super.toLogEntry(),
+			message: {
+				status: getEnumMemberName(TransmitResponseStatus, this.status),
+			},
+		};
+	}
+}
+
+export interface TransmitCallbackOptions {
+	status: TransmitCallbackStatus;
+}
+
+@rcpMessageTypes(RCPMessageType.Callback, RCPFunctionType.Transmit)
+export class TransmitCallback extends RCPMessage implements SuccessIndicator {
+	public constructor(
+		options: TransmitCallbackOptions & RCPMessageBaseOptions,
+	) {
+		super(options);
+		this.status = options.status;
+	}
+
+	public static from(
+		raw: RCPMessageRaw,
+		_ctx: RCPMessageParsingContext,
+	): TransmitCallback {
+		const status = raw.payload[0];
+
+		return new this({
+			status,
+		});
+	}
+
+	public status: TransmitCallbackStatus;
+
+	isOK(): boolean {
+		return this.status === TransmitCallbackStatus.Completed;
+	}
+
+	public toLogEntry(): MessageOrCCLogEntry {
+		return {
+			...super.toLogEntry(),
+			message: {
+				status: getEnumMemberName(TransmitCallbackStatus, this.status),
+			},
+		};
+	}
+}

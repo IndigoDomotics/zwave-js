@@ -1,7 +1,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { clearTemplateCache, resolveTemplateImport } from "@zwave-js/config";
+
 import { DEVICES_DIR, fs } from "../configEnv.js";
 import type { ToolHandler } from "../types.js";
+
 import { errorResult, jsonResult } from "./results.js";
 
 export const TOOL_NAME = "resolve_config_import";
@@ -41,6 +43,12 @@ export const resolveImportTool: ToolHandler<ResolveConfigImportArgs> = {
 		"Resolve an $import specifier to the JSON it pulls in, with the "
 		+ "imported file's own $imports resolved recursively. Mirrors the config "
 		+ "editor's import hover preview.",
+	annotations: {
+		readOnlyHint: true,
+		destructiveHint: false,
+		idempotentHint: true,
+		openWorldHint: false,
+	},
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -52,8 +60,9 @@ export const resolveImportTool: ToolHandler<ResolveConfigImportArgs> = {
 			},
 			specifier: {
 				type: "string",
-				description: "The $import specifier, e.g. "
-					+ "\"~/templates/master_template.json#base_enable_disable\"",
+				description:
+					"The $import specifier, e.g. "
+					+ '"~/templates/master_template.json#base_enable_disable"',
 			},
 		},
 		required: ["filename", "specifier"],
