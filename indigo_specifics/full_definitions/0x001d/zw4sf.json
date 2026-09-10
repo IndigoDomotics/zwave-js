@@ -1,0 +1,105 @@
+{
+  "manufacturer": "Leviton",
+  "manufacturerId": "0x001d",
+  "label": "ZW4SF",
+  "description": "4 Speed Fan Controller",
+  "devices": [
+    {
+      "productType": "0x0038",
+      "productId": "0x0002",
+      "zwaveAllianceId": 3832
+    }
+  ],
+  "firmwareVersion": {
+    "min": "0.0",
+    "max": "255.255"
+  },
+  "paramInformation": [
+    {
+      "valueSize": 1,
+      "minValue": 1,
+      "maxValue": 99,
+      "defaultValue": 10,
+      "unsigned": true,
+      "$purpose": "minimum_brightness",
+      "label": "Minimum Dim Level",
+      "#": "3"
+    },
+    {
+      "valueSize": 1,
+      "minValue": 0,
+      "maxValue": 100,
+      "defaultValue": 100,
+      "unsigned": true,
+      "$purpose": "maximum_brightness",
+      "label": "Maximum Dim Level",
+      "#": "4"
+    },
+    {
+      "label": "Initial Dim Level",
+      "valueSize": 1,
+      "unit": "%",
+      "minValue": 0,
+      "maxValue": 100,
+      "defaultValue": 0,
+      "options": [
+        {
+          "label": "Last dim level",
+          "value": 0
+        }
+      ],
+      "#": "5"
+    },
+    {
+      "label": "LED Dim Level Indicator Timeout",
+      "description": "How long the level indicators should stay illuminated after the dimming level is changed",
+      "valueSize": 1,
+      "unit": "seconds",
+      "minValue": 0,
+      "maxValue": 255,
+      "defaultValue": 3,
+      "unsigned": true,
+      "options": [
+        {
+          "label": "Always Off",
+          "value": 0
+        },
+        {
+          "label": "Always On",
+          "value": 255
+        }
+      ],
+      "#": "6"
+    },
+    {
+      "label": "Locator LED Status",
+      "valueSize": 1,
+      "defaultValue": 255,
+      "unsigned": true,
+      "allowManualEntry": false,
+      "options": [
+        {
+          "label": "LED always off",
+          "value": 0
+        },
+        {
+          "label": "LED on when switch is on",
+          "value": 254
+        },
+        {
+          "label": "LED on when switch is off",
+          "value": 255
+        }
+      ],
+      "#": "7"
+    }
+  ],
+  "metadata": {
+    "inclusion": "1. Hold the button for 7 seconds until the status light turns amber, then release\n2. Tap the top of the paddle one time\n3. The status light will quickly flash green",
+    "exclusion": "1. Hold the button for 7 seconds until the status light turns amber, then release\n2. Tap the top of the paddle one time\n3. The status light will quickly flash green",
+    "reset": "Hold the top of the paddle for 14 seconds. The status light will quickly flash red/amber.",
+    "manual": "https://products.z-wavealliance.org/ProductManual/File?folder=&filename=product_documents/3832/Draft%20ZW4SF%203-25-20.pdf"
+  },
+  "vers": 1,
+  "last_update": "2026-06-23T15:41:06.857904"
+}
